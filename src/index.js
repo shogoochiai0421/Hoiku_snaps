@@ -123,7 +123,7 @@ async function handleThread(env, slug, threadId) {
   const form = `
     <h2>返信する</h2>
     <form method="POST" action="/${escape(slug)}/${threadId}/reply">
-      <input name="author_name" placeholder="名前（省略で名無しさん）">
+      <input name="author_name" placeholder="名前ああああ（省略で名無しさん）">
       <textarea name="body" rows="4" placeholder="本文（必須）" required></textarea>
       <input name="delete_password" placeholder="削除パスワード（任意）" type="password">
       <button type="submit">返信する</button>
