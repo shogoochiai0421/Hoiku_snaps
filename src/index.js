@@ -71,7 +71,7 @@ async function handleTop(env) {
       <a href="/${escape(b.slug)}"><strong>${escape(b.name)}</strong></a>
       <p>${escape(b.description ?? '')}</p>
     </div>`).join('');
-  return layout('掲示板トップ', `<h1>掲示板</h1>${items}`);
+  return layout('掲示板トップ', `<h1>掲示板テスト</h1>${items}`);
 }
 
 // 板: スレッド一覧
