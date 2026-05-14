@@ -1,0 +1,1195 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>きもちチェック</title>
+</head>
+<body>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=M+PLUS+Rounded+1c:wght@400;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Zen+Maru+Gothic&display=swap');
+
+/* =====================================================
+   ★ デザイン設定まとめ ★
+   PC・タブレット向け（通常）とスマホ向け（480px以下）を
+   ここに並べて管理できます。数値を変えると見た目が変わります。
+   ===================================================== */
+
+/* ── PC・タブレット向け設定 ── */
+:root {
+  /* ── フェード・アニメーション ── */
+  --fade-ms:             500;  /* 画面切り替えのフェード時間（ミリ秒） */
+  --fade-wait-ms:        200;  /* 選択肢を押してから次へ行くまでの待ち時間（ミリ秒） */
+  --bubble-feed-ms:     300;  /* 特効薬バブルが出そろうまでの時間（ミリ秒） */
+
+  /* ── 今の気持ち画面 ── */
+  --res-ttl-size:        40px; /* きもちタイトルの文字サイズ */
+  --res-desc-size:       25px; /* きもちの説明文の文字サイズ */
+  --center-img-size:    220px; /* 中央カードの画像サイズ */
+  --center-txt-size:     30px; /* 中央カードのラベル文字サイズ */
+
+  /* ── 特効薬画面 ── */
+  --act-ttl-size:        28px; /* 特効薬画面タイトルの文字サイズ */
+  --act-desc-size:       16px; /* 特効薬画面説明文の文字サイズ */
+  --bubble-w:           255px; /* バブルの横幅（5列×2段レイアウト） */
+  --bubble-txt:          16px; /* バブルの文字サイズ */
+  --bubble-img-size:    150px; /* バブルの画像サイズ */
+  --bubble-gap:          20px; /* バブル間のすき間 */
+
+  /* ── 特効薬詳細画面 ── */
+  --detail-img-size:    280px; /* 詳細画面の画像サイズ */
+  --detail-ttl-size:     30px; /* 詳細画面のタイトル文字サイズ */
+  --detail-desc-size:    22px; /* 詳細画面の解説文字サイズ */
+
+  /* ── 太字の設定（400=ふつう / 700=太字） ── */
+  --fw-q-text:           700;  /* 質問文の太さ */
+  --fw-opt-label:        700;  /* 選択肢のラベルの太さ */
+  --fw-res-ttl:          700;  /* 今の気持ち画面タイトルの太さ */
+  --fw-res-desc:         700;  /* 各画面の説明文の太さ */
+  --fw-bubble:           700;  /* 特効薬バブルの文字の太さ */
+}
+
+
+
+/* ===================================================== */
+
+*{box-sizing:border-box;margin:0;padding:0}
+
+html, body {
+  width:100%;
+  height:100dvh; /* dynamic viewport height：アドレスバー等を除いた実際の高さ */
+  overflow:hidden;
+  background-color: rgb(255, 250, 241);
+}
+
+#app {
+  font-family:'M PLUS Rounded 1c',sans-serif;
+  font-weight:700;
+  width:100%;
+  height:100dvh;
+  display:flex; flex-direction:column;
+  color:#53433a;
+  overflow:hidden;
+  position:relative;
+}
+
+.header-text {
+  position:absolute; bottom:20px; right:40px;
+  font-size:18px; color:#7e7d81;
+  z-index:100; pointer-events:none;
+  font-family:'Zen Maru Gothic',sans-serif;
+}
+
+
+.footer-text {
+  position:absolute; bottom:20px; left:30px;
+  font-size:16px; color:#7e7d81;
+  z-index:100; pointer-events:none;
+  font-family:'Zen Maru Gothic',sans-serif;
+}
+
+/* ── 画面共通：フェード ── */
+.screen {
+  display:none; width:100%; height:100%;
+  flex-direction:column; align-items:center; justify-content:center;
+  padding:20px;
+  opacity:0;
+  transition:opacity calc(var(--fade-ms) * 1ms) ease;
+  overflow:hidden;
+}
+.screen.active  { display:flex; }
+.screen.visible { opacity:1; }
+
+/* ── スタート画面 ── */
+#startScreen {
+  justify-content: flex-start;
+  padding-top: 115px; /* 上からの余白で調整 */
+}
+.big-img {width:250px; height:250px; object-fit:contain; margin-bottom:10px; display:block;} /* スタート画面のイラスト */
+.ttl { font-size:35px; color:var(--color-text-secondary); text-align:center; line-height:1.2; margin-bottom:30px; }
+.sub { font-size:25px; color:var(--color-text-secondary); text-align:center; line-height:1.2; margin-bottom:30px;   font-family:'Zen Maru Gothic',sans-serif;}
+.start-btn { background:#ffce65; color:#fff; border:none; border-radius:99px; padding:30px 50px; font-size:30px; font-weight:500; cursor:pointer; }
+.start-btn:active { transform:scale(0.96); }
+
+/* ── 質問画面 ── */
+#quizScreen {
+  justify-content: flex-start;
+  padding-top: 60px;
+}
+.pbar-wrap { width:100%; height:7px; background:var(--color-background-secondary); border-radius:99px; margin-bottom:16px; overflow:hidden; flex-shrink:0; }
+.pbar { height:100%; border-radius:99px; background:#FFA726; transition:width .35s; }
+.q-text { font-size:40px; font-weight:var(--fw-q-text); color:var(--color-text-primary); text-align:center; line-height:1.5; margin-bottom:16px; flex-shrink:0; }
+.opts { display:grid; grid-template-columns:1fr 1fr; gap:15px; width:100%; max-width:600px; flex-shrink:0; margin: 0 auto; }
+.opt  { background:#FFF3E0; border:1.5px solid #FFCC80; border-radius:16px; padding:11px 50px; font-size:20px; cursor:pointer; color:var(--color-text-primary); display:flex; flex-direction:column; align-items:center; gap:5px; transition:background .12s,border-color .12s; }
+.opt .oi     { font-size:10px; line-height:1; min-height:50px; display:flex; align-items:center; justify-content:center; }
+.opt .oi img { width:130px; height:130px; object-fit:contain; } /* 選択肢上のイラスト */
+.opt .ol     { font-weight:var(--fw-opt-label); }
+.opt:hover  { background:#FFE0B2; border-color:#FFA726; }
+.opt.sel    { background:#FFE0B2; border-color:#FFA726; color:#72243E; }
+.opt:active { transform:scale(0.95); }
+
+/* ── もどるボタン ── */
+.back-btn { align-self:center; margin-top:12px; background:transparent; border:none; font-size:18px; color:#bbbbbb; cursor:pointer; padding:4px 8px; flex-shrink:0; }
+.back-btn:hover { color:#888; }
+.back-btn:active { transform:scale(0.95); }
+.back-btn.hidden { visibility:hidden; pointer-events:none; }
+
+/* ── 結果画面 ── */
+#resultScreen {
+  padding:0; justify-content:flex-start; 
+  justify-content: flex-start;
+  padding-top: 20px;
+}
+.res-top  { text-align:center; padding:8px 16px 4px; flex-shrink:0; width:100%; }
+.res-img  { width:var(--res-img-size); height:var(--res-img-size); object-fit:contain; margin:0 auto 3px; display:block;}
+.res-ttl  { font-size:var(--res-ttl-size); font-weight:var(--fw-res-ttl); color:var(--color-text-primary); }
+.res-desc { font-size:var(--res-desc-size); font-weight:var(--fw-res-desc); color:var(--color-text-secondary); margin-top:3px; line-height:1.5; }
+
+/* ── 今の気持ち画面 ── */
+.center-card     { background:var(--color-background-primary); border:1px solid var(--color-border-secondary); border-radius:24px; padding:10px 20px; text-align:center; width:auto; min-width:120px; }
+.center-card .ce { line-height:1; margin-bottom:4px; min-height:50px; display:flex; align-items:center; justify-content:center; }
+.center-card .ce img { width:var(--center-img-size); height:var(--center-img-size); object-fit:contain; }
+.center-card .ct { font-size:var(--center-txt-size); font-weight:700; color:var(--color-text-secondary); line-height:1.4; white-space:nowrap; }
+.sub-tags { margin-top:8px; display:flex; flex-direction:column; gap:3px; }
+.sub-tag  { font-size:14px; color:#888; line-height:1.4; white-space:nowrap; }
+
+/* ── 特効薬画面 ── */
+#actScreen { padding:clamp(8px,1.5vh,16px) 16px clamp(4px,1vh,8px); justify-content:flex-start; }
+.act-top  { text-align:center; padding:clamp(8px,2vh,30px) 0 clamp(4px,1vh,10px); flex-shrink:0; width:100%; }
+.act-ttl  { font-size:clamp(14px, 3vh, var(--act-ttl-size));  font-weight:var(--fw-res-ttl);  color:var(--color-text-primary); }
+.act-desc { font-size:clamp(10px, 1.8vh, var(--act-desc-size)); font-weight:var(--fw-res-desc); color:var(--color-text-secondary); margin-top:4px; line-height:1.5; }
+
+.bubble-grid {
+  display:grid;
+  /* バブル幅をmin()でビューポートに応じて自動縮小 */
+  grid-template-columns: repeat(5, min(var(--bubble-w), 18vw));
+  gap:clamp(6px, 1vw, var(--bubble-gap));
+  justify-content:center;
+  align-content:center;
+  width:100%;
+  flex:1;
+  padding:0 8px;
+  min-height:0;
+  overflow:hidden;
+}
+@media (max-width: 480px) {
+  .bubble-grid {
+    grid-template-columns: repeat(2, min(var(--bubble-w), 44vw));
+    gap:clamp(6px, 2vw, var(--bubble-gap));
+  }
+}
+
+.bubble { width:100%; border-radius:20px; display:flex; flex-direction:column; align-items:center; justify-content:center; text-align:center; font-size:clamp(10px, 1.2vw, var(--bubble-txt)); font-weight:var(--fw-bubble); line-height:1.4; padding:clamp(6px,1vh,10px) 8px; opacity:0; transition:opacity 0.6s ease; gap:4px; }
+@media (max-width:480px) { .bubble { font-size:clamp(10px, 3vw, var(--bubble-txt)); } }
+.bubble-img { width:min(var(--bubble-img-size), 13vw); height:min(var(--bubble-img-size), 13vw); object-fit:contain; flex-shrink:0; }
+@media (max-width:480px) { .bubble-img { width:min(var(--bubble-img-size), 35vw); height:min(var(--bubble-img-size), 35vw); } }
+.bubble-txt { line-height:1.4; }
+
+.retry-btn { flex-shrink:0; margin:8px 0 12px; background:var(--color-background-secondary); border:0.5px solid var(--color-border-secondary); border-radius:99px; padding:7px 22px; font-size:18px; color:var(--color-text-secondary); cursor:pointer; }
+.next-screen-btn { flex-shrink:0; margin:12px 0 0; background:#ffce65; color:#fff; border:none; border-radius:99px; padding:14px 32px; font-size:22px; font-weight:700; cursor:pointer; }
+.next-screen-btn:active { transform:scale(0.96); }
+
+/* ── 特効薬詳細画面 ── */
+#detailScreen {
+  justify-content:center; align-items:center;
+  padding:16px; gap:16px;
+  background:transparent;
+}
+
+/* カード本体 */
+.detail-card {
+  width:min(400px, 88vw);
+  border-radius:20px;
+  overflow:hidden;
+  box-shadow: 0 8px 16px rgba(0,0,0,0.18), 0 2px 4px rgba(0,0,0,0.10);
+  display:flex; flex-direction:column;
+  flex-shrink:0;
+  border: 3px solid rgba(255,255,255,0.55);
+}
+
+/* カードヘッダー（イメージカラー背景） */
+.detail-card-header {
+  padding:32px 18px 5px;
+  background: var(--detail-bg, #FBEAF0);
+}
+.detail-card-ttl {
+  font-size:var(--detail-ttl-size);
+  font-weight:700;
+  color: var(--detail-tc, #72243E);
+  text-align:center;
+  line-height:1.3;
+}
+
+/* イラストエリア */
+.detail-card-img-wrap {
+  background: var(--detail-bg, #FBEAF0);
+  display:flex; justify-content:center; align-items:flex-end;
+  padding:24px 0 0;
+  overflow:hidden;
+  min-height:calc(var(--detail-img-size) + 16px);
+}
+.detail-img {
+  width:var(--detail-img-size);
+  height:var(--detail-img-size);
+  object-fit:contain;
+  transform-origin: 50% 80%; /* 下端を基点に揺れる */
+  animation: detailSway 5s ease-in-out infinite;
+}
+@keyframes detailSway {
+  
+  0%   { transform: rotate(0deg); }
+  5%   { transform: rotate(3deg); }
+  15%  { transform: rotate(-4deg); }
+  25%  { transform: rotate(3deg); }
+  40%  { transform: rotate(-1deg); }
+  55%  { transform: rotate(0deg); }
+
+  /* 25%から100%（9秒間）は0度のまま固定 = 静止 */
+  100% { transform: rotate(0deg); }
+}
+
+/* 解説テキストエリア */
+.detail-card-body {
+  background:#fff;
+  padding:10px 22px 30px;
+}
+.detail-card-desc {
+  font-size:var(--detail-desc-size);
+  color:#53433a;
+  text-align:center;
+  line-height:1.8;
+}
+
+/* もどるボタン */
+.detail-back-btn {
+  background:rgba(255,255,255,0.75);
+  border:1.5px solid rgba(0,0,0,0.12);
+  border-radius:99px;
+  padding:10px 28px;
+  font-size:17px;
+  font-family:'M PLUS Rounded 1c',sans-serif;
+  font-weight:700;
+  color:#53433a;
+  cursor:pointer;
+  flex-shrink:0;
+}
+.detail-back-btn:active { transform:scale(0.96); }
+
+/* ── いいねボタン ── */
+.detail-card-body {
+  position: relative;
+}
+.like-btn {
+  position:absolute;
+  bottom:10px; right:10px;
+  background:transparent;
+  border:none;
+  cursor:pointer;
+  padding:4px;
+  line-height:1;
+}
+.like-btn:active { transform:scale(0.88); }
+.like-img {
+  width:var(--like-img-size, 44px);
+  height:var(--like-img-size, 44px);
+  object-fit:contain;
+  transition:transform 0.15s ease;
+}
+.like-btn.liked .like-img { transform:scale(1.15); }
+
+
+
+/* ── スマホ向け設定（画面幅 480px 以下） ── */
+@media (max-width: 480px) {
+  :root {
+    /* 今の気持ち画面 */
+    --center-img-size:  120px;
+    --center-txt-size:  18px;
+
+    /* 特効薬画面 */
+    --act-ttl-size:     20px;
+    --act-desc-size:    12px;
+    --bubble-w:        140px;
+    --bubble-txt:       12px;
+    --bubble-img-size:  80px;
+    --bubble-gap:        8px;
+
+    /* 特効薬詳細画面 */
+    --detail-img-size: 200px;
+    --detail-ttl-size:  25px;
+    --detail-desc-size: 18px;
+  }
+
+  /* スタート画面 */
+  #startScreen { padding-top: 60px; }
+  .big-img     { width: 150px; height: 150px; }
+  .ttl         { font-size: 32px; margin-bottom: 16px; }
+  .sub         { font-size: 18px; margin-bottom: 30px; }
+  .start-btn   { font-size: 18px; padding: 20px 36px; }
+  .footer-text { font-size: 10px; bottom: 10px; left: 8px; }
+  .header-text { font-size: 4px; bottom: 12px; right: 16px; }
+
+  /* 質問画面 */
+  #quizScreen  { padding-top:20px; }
+  .q-text      { font-size: 28px; margin-bottom: 10px; }
+  .opts        { gap: 10px; max-width: 100%; }
+  .opt         { padding: 8px 12px; font-size: 14px; }
+  .opt .oi img { width: 110px; height: 110px; }
+  .back-btn    { font-size: 10px; }
+
+  /* 今の気持ち画面 */
+  #resultScreen    { padding-top: 5px; }
+  .res-ttl         { font-size: 20px; }
+  .res-desc        { font-size: 8px; }
+  .center-card .ct { font-size: 15px; }
+  .sub-tags        { font-size: 10px; }
+  .retry-btn       { font-size: 10px; margin-bottom: 16px; }
+  .next-screen-btn { font-size: 16px; padding: 12px 24px; }
+
+  /* ── 名前追加画面：入力欄＋ボタンを横幅内に収める ── */
+  #nameScreen      { padding: 16px 12px 12px; }
+  .name-input-row  { flex-wrap: nowrap; width: 100%; max-width: 100%; }
+  .name-input      { min-width: 0; font-size: 16px; padding: 10px; }         /* flex縮小を許可 */
+  .name-confirm-btn{ font-size: 14px; padding: 10px 14px; white-space: nowrap; }
+}
+
+
+/* ── 名前選択UI（スタート画面右上） ── */
+.name-bar {
+  position:absolute; top:16px; right:16px;
+  display:flex; align-items:center; gap:8px; z-index:100;
+}
+.name-select {
+  font-family:'M PLUS Rounded 1c',sans-serif;
+  font-weight:700;
+  font-size:20px;
+  color:#53433a;
+  background:#fff;
+  border:1.5px solid #FFCC80;
+  border-radius:99px;
+  padding:11px 25px;
+  cursor:pointer;
+  max-width:290px;
+  outline:none;
+}
+.name-add-btn {
+  width:60px; height:60px;
+  background:#ffce65;
+  color:#fff;
+  border:none;
+  border-radius:50%;
+  font-size:40px;
+  font-weight:700;
+  cursor:pointer;
+  display:flex; align-items:center; justify-content:center;
+  flex-shrink:0;
+  line-height:1;
+}
+.name-add-btn:active { transform:scale(0.92); }
+
+/* ── 名前管理画面 ── */
+#nameScreen {
+  justify-content:flex-start;
+  padding:24px 28px 20px;
+  gap:0;
+  overflow:hidden;
+}
+.name-screen-head {
+  display:flex; align-items:center; gap:10px;
+  width:100%; max-width:600px; margin:0 auto 18px; flex-shrink:0;
+}
+.name-back-btn {
+  background:transparent; border:none;
+  font-size:20px; color:#b09070; cursor:pointer;
+  font-family:'M PLUS Rounded 1c',sans-serif; font-weight:700;
+  padding:4px 8px; flex-shrink:0;
+}
+.name-screen-title {
+  font-size:20px; font-weight:700; color:#53433a; flex:1;
+}
+.name-count {
+  font-size:13px; color:#c0a888; flex-shrink:0;
+}
+.name-input-row {
+  display:flex; gap:8px; width:100%; max-width:600px;
+  margin:0 auto 20px; flex-shrink:0;
+}
+.name-input {
+  flex:1;
+  font-family:'M PLUS Rounded 1c',sans-serif;
+  font-weight:700; font-size:18px;
+  border:1.5px solid #FFCC80; border-radius:12px;
+  padding:10px 14px; color:#53433a;
+  background:#FFF9F0; outline:none;
+}
+.name-input:focus { border-color:#FFA726; }
+.name-confirm-btn {
+  background:#ffce65; color:#fff; border:none;
+  border-radius:12px; padding:10px 20px;
+  font-size:16px; font-weight:700;
+  font-family:'M PLUS Rounded 1c',sans-serif;
+  cursor:pointer; flex-shrink:0;
+}
+.name-confirm-btn:active { transform:scale(0.95); }
+.name-list-wrap {
+  flex:1; overflow-y:auto; width:100%; max-width:600px; margin:0 auto;
+}
+.name-list {
+  list-style:none; width:100%;
+  display:grid; grid-template-columns:1fr 1fr; gap:10px;
+  padding:4px 0;
+}
+.name-list-item {
+  display:flex; align-items:center; justify-content:space-between;
+  background:#fff; border:1.5px solid #FFCC80;
+  border-radius:14px; padding:10px 14px;
+  font-size:17px; color:#53433a;
+}
+.name-del-btn {
+  background:transparent; border:1px solid #ffb3b3;
+  border-radius:99px; padding:3px 12px;
+  font-size:12px; color:#cc7070; cursor:pointer;
+  font-family:'M PLUS Rounded 1c',sans-serif; font-weight:700;
+  flex-shrink:0; margin-left:6px;
+}
+.name-del-btn:active { transform:scale(0.95); }
+.name-empty {
+  text-align:center; color:#c0a888; font-size:15px;
+  padding:30px 0; grid-column:1/-1;
+}
+.name-del-all-btn {
+  background:transparent; border:1px solid #ffb3b3;
+  border-radius:99px; padding:5px 14px;
+  font-size:13px; color:#cc7070; cursor:pointer;
+  font-family:'M PLUS Rounded 1c',sans-serif; font-weight:700;
+  flex-shrink:0;
+}
+.name-del-all-btn:active { transform:scale(0.95); }
+
+/* ── 名前選択ヒント ── */
+#nameSelectHint {
+  position:absolute;
+  top:90px; /* name-bar(top:16px + 高さ約60px) + 余白14px */
+  right:120px;
+  font-family:'M PLUS Rounded 1c',sans-serif;
+  font-weight:400;
+  font-size:18px;
+  color:#7e7d81;
+  pointer-events:none;
+  display:none;
+  animation: hintBounce 1s ease-in-out infinite;
+  z-index:100;
+  white-space:nowrap;
+}
+@keyframes hintBounce {
+  0%,100% { transform:translateY(0); }
+  50%      { transform:translateY(-5px); }
+}
+
+/* ── 名前選択UI・ヒント スマホ設定（PC用CSSの後に書くことで正しく上書き） ── */
+@media (max-width: 480px) {
+  .name-bar     { top: 14px; right: 11px; gap: 6px; }
+  .name-select  { font-size: 12px; padding: 8px 18px; max-width: 203px; }
+  .name-add-btn { width: 42px; height: 42px; font-size: 28px; }
+  #nameSelectHint { top: 63px; right: 84px; font-size: 13px; }
+}
+
+</style>
+
+<div id="app">
+<div id="startScreen" class="screen active">
+  <!-- 名前選択バー -->
+  <div class="name-bar">
+    <select class="name-select" id="nameSelect" onchange="onNameSelect()">
+      <option value="">なまえを えらぶ</option>
+    </select>
+    <button class="name-add-btn" onclick="goNameScreen()" title="名前を追加する">＋</button>
+  </div>
+  <div id="nameSelectHint">↑ なまえをせんたく</div>
+
+  <img class="big-img" id="startImg" src="" alt="">
+  <div class="ttl">きもちチェック</div>
+  <div class="sub">しつもんにこたえると<br>きもちラクラクのヒントがでてくるよ！</div>
+  <button class="start-btn" id="startBtn" onclick="startQ()">はじめる</button>
+<div style="position:absolute; bottom:20px; left:30px; display:flex; gap:20px; z-index:100;">
+  <div class="footer-text" style="position:static; bottom:auto; left:auto; pointer-events:none;">開発 横浜保育教育専門学校 にじいろゼミ</div>
+  <a href="https://docs.google.com/forms/d/e/1FAIpQLSeFqVYJE5zGsHYEIMp1BIrcc5-U1TKQFIKo03nMVefwHbz6gw/viewform?usp=dialog" target="_blank" class="footer-text" style="position:static; bottom:auto; left:auto; pointer-events:auto; color:#7e7d81; text-decoration:underline;">連絡はこちら</a>
+  <a href="about.html" class="footer-text" style="position:static; bottom:auto; left:auto; pointer-events:auto; color:#7e7d81; text-decoration:underline;">使い方・このサイトについて</a>
+</div>
+</div>
+
+<!-- 名前管理画面 -->
+<div id="nameScreen" class="screen">
+  <div class="name-screen-head">
+    <button class="name-back-btn" onclick="goBackToStart()">← もどる</button>
+    <span class="name-screen-title">名前を追加する</span>
+    <span class="name-count" id="nameCount"></span>
+    <button class="name-del-all-btn" onclick="confirmDeleteAllNames()">すべて削除</button>
+  </div>
+  <div class="name-input-row">
+    <input class="name-input" id="nameInput" type="text" placeholder="なまえをいれてね" maxlength="20"
+      onkeydown="if(event.key==='Enter')addName()">
+    <button class="name-confirm-btn" onclick="addName()">追加</button>
+  </div>
+  <div class="name-list-wrap">
+    <ul class="name-list" id="nameList"></ul>
+  </div>
+</div>
+
+<div id="quizScreen" class="screen">
+  <div class="pbar-wrap"><div class="pbar" id="pbar" style="width:0%"></div></div>
+  <div id="quizNameBadge" style="display:none;align-self:flex-start;font-size:24px;color:#b09070;margin-bottom:2px;margin-top:-6px;font-family:'M PLUS Rounded 1c',sans-serif;font-weight:700;"></div>
+  <div class="q-text" id="qtext"></div>
+  <div class="opts" id="opts"></div>
+  <button class="back-btn hidden" id="backBtn" onclick="goBack()">← もどる</button>
+  <button class="back-btn hidden" id="topBtn" onclick="goTop()">← さいしょにもどる</button>
+</div>
+<!-- 今の気持ち画面 -->
+<div id="resultScreen" class="screen" style="justify-content:center;gap:16px;padding:20px;">
+  <div id="resultNameLabel" style="display:none;font-size:36px;color:#b09070;font-family:'M PLUS Rounded 1c',sans-serif;font-weight:700;text-align:center;flex-shrink:0;margin-bottom:4px;"></div>
+  <div class="res-top">
+    <div id="resicon"></div>
+    <div class="res-ttl" id="rttl"></div>
+    <div class="res-desc" id="rdesc"></div>
+  </div>
+  <div class="center-card" style="margin:0 auto;">
+    <div class="ce" id="cce"></div>
+    <div class="ct" id="cct"></div>
+    <div class="sub-tags" id="subTags"></div>
+  </div>
+  <button class="next-screen-btn" onclick="showActScreen()">これ、やってみる？ →</button>
+  <button class="retry-btn" onclick="restart()">もういちど</button>
+</div>
+
+<!-- 特効薬画面 -->
+<div id="actScreen" class="screen">
+  <div class="act-top">
+    <div id="actNameLabel" style="display:none;font-size:24px;color:#b09070;font-family:'M PLUS Rounded 1c',sans-serif;font-weight:700;text-align:center;margin-bottom:4px;"></div>
+    <div class="act-ttl" id="actTtl"></div>
+    <div class="act-desc" id="actDesc"></div>
+  </div>
+  <div class="bubble-grid" id="bscene"></div>
+  <button class="retry-btn" onclick="restart()">さいしょから</button>
+</div>
+
+<!-- 特効薬詳細画面 -->
+<div id="detailScreen" class="screen">
+  <div class="detail-card" id="detailCard">
+    <div class="detail-card-header">
+      <div class="detail-card-ttl" id="detailTtl"></div>
+    </div>
+    <div class="detail-card-img-wrap">
+      <img id="detailImg" src="" alt="" class="detail-img">
+    </div>
+    <div class="detail-card-body">
+      <div class="detail-card-desc" id="detailDesc"></div>
+      <button class="like-btn" id="likeBtn" onclick="toggleLike()">
+        <img id="likeImg" src="" alt="👍" class="like-img">
+      </button>
+    </div>
+  </div>
+  <button class="detail-back-btn" onclick="closeDetail()">← もどる</button>
+</div>
+</div>
+
+<script src="data.js"></script>
+
+<script>
+const BASE_EXP  = "https://raw.githubusercontent.com/shogoochiai0421/YourEmo/main/images/expressions/";
+const BASE_ACT  = "https://raw.githubusercontent.com/shogoochiai0421/YourEmo/main/images/acts/";
+
+/* =============================================
+   ★ いいね送信の設定 ★
+   Googleフォームを作成したら以下を設定してね。
+   LIKE_FORM_URL : フォームの送信先URL（action属性のURL）
+   LIKE_ENTRY_TITLE : 「特効薬タイトル」のentry.XXXXXXXX
+   LIKE_ENTRY_DATE  : 「日付」のentry.XXXXXXXX
+   ============================================= */
+const LIKE_FORM_URL   = "https://script.google.com/macros/s/AKfycbzcbklm2r93eMbRuo10ryAoTPb1KR7Ywkg7BBp_znLUmYcDFJIES6ClpmjMCGLkPTg/exec";
+
+/* セッション中のいいね状態を保持（キー：特効薬テキスト） */
+const likedSet = new Set();
+
+/* いいね画像のURL（後から差し替え可能） */
+const LIKE_IMG_OFF = BASE_ACT + "like-off.png"; /* 未いいね状態の画像 */
+const LIKE_IMG_ON  = BASE_ACT + "like-on.png";  /* いいね済み状態の画像 */
+const IMG = {
+  rainbow:        BASE_EXP+"main-rainbow.png",
+  smile:          BASE_EXP+"expression-smile.png",
+  cry:            BASE_EXP+"expression-cry.png",
+  mad:            BASE_EXP+"expression-mad.png",
+  puzzled:        BASE_EXP+"expression-puzzled.png",
+  sad:            BASE_EXP+"expression-sad.png",
+  normal:         BASE_EXP+"expression-normal.png",
+  amaze:          BASE_EXP+"expression-amaze.png",
+  kidding:        BASE_EXP+"expression-kidding.png",
+  wink:           BASE_EXP+"expression-wink.png",
+  enjoy:          BASE_EXP+"expression-enjoy.png",
+  expressionless: BASE_EXP+"expression-expressionless.png",
+  fear:           BASE_EXP+"expression-fear.png",
+  notfeelingwell: BASE_EXP+"expression-notfeelingwell.png",
+  panic:          BASE_EXP+"expression-panic.png",
+  sickness:       BASE_EXP+"expression-sickness.png",
+  sleepy:         BASE_EXP+"expression-sleepy.png",
+  tired:          BASE_EXP+"expression-tired.png",
+  playwith:       BASE_EXP+"expression-playwith.png",
+  alone:          BASE_EXP+"expression-alone.png",
+  palpitations:   BASE_EXP+"expression-palpitations.png",
+  stuffy:         BASE_EXP+"expression-stuffy.png",
+  talk:          BASE_EXP+"expression-talking.png",
+  happy:          BASE_EXP+"expression-happy.png",
+};
+
+const Qs=[
+  {id:"mood",text:"いまのきもちはどれかな？",opts:[
+    {i:"😄",ikey:"smile",  l:"たのしいきもち",    v:"happy"},
+    {i:"😢",ikey:"cry",    l:"かなしいきもち",    v:"sad"},
+    {i:"😠",ikey:"mad",    l:"いらいらする",v:"angry"},
+    {i:"😨",ikey:"fear",   l:"なんだかこわいきもち",v:"anxious"}
+  ]},
+  {id:"energy",text:"からだにげんきはあるかな？",opts:[
+    {i:"🔥",ikey:"happy",         l:"げんきいっぱい",v:"high"},
+    {i:"😴",ikey:"tired",         l:"つかれたな",   v:"low"},
+    {i:"🤒",ikey:"notfeelingwell",l:"ぐったり…",   v:"verylow"},
+    {i:"😐",ikey:"expressionless",l:"ふつうかな",   v:"mid"},
+  ]},
+  {id:"social",text:"だれかといたいきもちはある？",opts:[
+    {i:"🤗",ikey:"playwith",     l:"いっしょにいたい",v:"social"},
+    {i:"🏠",ikey:"alone",     l:"ひとりがいいな", v:"alone"},
+    {i:"🙂",ikey:"wink", l:"どちらでも",     v:"neutral"},
+    {i:"😶",ikey:"expressionless",     l:"わからない",     v:"unsure"}
+  ]},
+  {id:"body",text:"からだはどんなかんじ？",opts:[
+    {i:"😌",    ikey:"smile",  l:"げんき",  v:"fine"},
+    {i:"💓",    ikey:"palpitations",   l:"ドキドキしてる", v:"heart"},
+    {i:"😮‍💨",ikey:"stuffy",   l:"いきぐるしい",  v:"breath"},
+    {i:"🤢",    ikey:"sickness",l:"きもちわるい<br>あたまがいたい",v:"bad"},
+  ]},
+  {id:"wish",text:"いましたいことは？",opts:[
+    {i:"🎮",ikey:"playwith",   l:"あそびたい",     v:"play"},
+    {i:"😴",ikey:"sleepy",  l:"ねむりたい",     v:"sleep"},
+    {i:"🤝",ikey:"talk", l:"はなしたい",     v:"talk"},
+    {i:"😶",ikey:"expressionless", l:"なにもしたくない",v:"nothing"}
+  ]}
+];
+
+
+/* 配列からランダムに1つ選んで返す *//* 回答とバブルのタグを照合してスコアを計算する。
+   各タグは文字列または配列で複数指定可能。
+   "any" はスコアに加算しない（除外しないだけ）。
+   回答値と一致したタグ1つにつき +1点。重みは 2^score。 */
+function matchTag(tag, val){
+  if(!tag || tag === "any") return false;        /* any は加点しない */
+  if(Array.isArray(tag)) return tag.includes(val); /* 配列なら includes で判定 */
+  return tag === val;
+}
+function scoreBubble(bubble, ans){
+  let score = 0;
+  const tags = bubble.tags;
+  if(matchTag(tags.mood,   ans.mood))   score++;
+  if(matchTag(tags.energy, ans.energy)) score++;
+  if(matchTag(tags.social, ans.social)) score++;
+  if(matchTag(tags.body,   ans.body))   score++;
+  if(matchTag(tags.wish,   ans.wish))   score++;
+  return score;
+}
+
+/* スコアに基づく重み付きランダム選択でN個を返す。
+   1点以上を優先し、足りない場合のみ0点から補充する */
+function selectBubbles(ans, n){
+  const scored = BUBBLES.map(b => {
+    const s = scoreBubble(b, ans);
+    return {b, s, w: Math.pow(2, s)};
+  });
+
+  /* まず1点以上を候補にする */
+  let candidates = scored.filter(x => x.s >= 1);
+
+  /* 足りない場合は0点から不足分を補充 */
+  if(candidates.length < n){
+    const zeros = scored.filter(x => x.s === 0);
+    candidates = candidates.concat(zeros.slice(0, n - candidates.length));
+  }
+
+  /* 重み付き抽選 */
+  const result = [];
+  const used = new Set();
+  for(let i = 0; i < n && used.size < candidates.length; i++){
+    const total = candidates.reduce((s, x, idx) => used.has(idx) ? s : s + x.w, 0);
+    let r = Math.random() * total;
+    for(let j = 0; j < candidates.length; j++){
+      if(used.has(j)) continue;
+      r -= candidates[j].w;
+      if(r <= 0){ used.add(j); result.push(candidates[j].b); break; }
+    }
+  }
+  return result;
+}
+
+/* 配列からランダムに1つ選んで返す */
+function pick(arr){return arr[Math.floor(Math.random()*arr.length)];}
+/* 配列をランダムにシャッフルして返す */
+function shuffle(arr){const a=[...arr];for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]];}return a;}
+/* CSSカスタムプロパティ（:root変数）の値を数値で取得する */
+function cssVar(name){return parseFloat(getComputedStyle(document.documentElement).getPropertyValue(name))||0;}
+
+let cur=0,ans={},busy=false,chosenBubbles=[];
+
+/* 指定した画面要素をフェードインで表示する */
+function fadeIn(el){
+  el.classList.add("active");
+  requestAnimationFrame(()=>requestAnimationFrame(()=>el.classList.add("visible")));
+}
+/* 指定した画面要素をフェードアウトし、完了後にコールバックを実行する */
+function fadeOut(el,cb){
+  el.classList.remove("visible");
+  setTimeout(()=>{el.classList.remove("active");if(cb)cb();},cssVar('--fade-ms')||300);
+}
+/* 質問画面のコンテンツだけをふわっと切り替える（画面全体ではなく中身のみ） */
+function fadeContent(cb){
+  const qs=document.getElementById("quizScreen");
+  const ms=(cssVar('--fade-ms')||300)*0.6;
+  qs.style.transition=`opacity ${ms}ms ease`;
+  qs.style.opacity="0";
+  setTimeout(()=>{cb();qs.style.opacity="1";setTimeout(()=>{qs.style.transition="";},ms+50);},ms);
+}
+
+/* =============================================
+   ★ 名前データの送信設定 ★
+   GASのURLを設定してね（いいねと別でも同じでもOK）
+   ============================================= */
+const NAME_RESULT_URL = "https://script.google.com/macros/s/XXXXXXXXXX/exec"; /* ← GASのURLに変えてね */
+
+/* ── 名前管理（localStorage） ── */
+const NAMES_KEY = "kimochi_names"; /* localStorageのキー */
+
+/* 名前一覧をlocalStorageから取得 */
+function loadNames(){
+  try { return JSON.parse(localStorage.getItem(NAMES_KEY)) || []; }
+  catch(e){ return []; }
+}
+/* 名前一覧をlocalStorageに保存 */
+function saveNames(list){
+  localStorage.setItem(NAMES_KEY, JSON.stringify(list));
+}
+/* 短いユニークID生成（8文字英数字） */
+function genId(){
+  return Math.random().toString(36).slice(2,10);
+}
+
+/* 名前選択ヒントの表示／非表示を制御 */
+function updateNameSelectHint(){
+  const hint = document.getElementById("nameSelectHint");
+  if(!hint) return;
+  const list = loadNames();
+  const sel  = document.getElementById("nameSelect");
+  /* 名前がある かつ まだ選択されていない場合のみ表示 */
+  if(list.length > 0 && (!sel || !sel.value)){
+    hint.style.display = "block";
+  } else {
+    hint.style.display = "none";
+  }
+}
+
+/* スタート画面のプルダウンを更新 */
+function refreshNameSelect(){
+  const list = loadNames();
+  const sel = document.getElementById("nameSelect");
+  const cur = sel.value;
+  sel.innerHTML = '<option value="">なまえを えらぶ</option>';
+  list.forEach(n => {
+    const opt = document.createElement("option");
+    opt.value = n.id;
+    opt.textContent = n.name;
+    if(n.id === cur) opt.selected = true;
+    sel.appendChild(opt);
+  });
+  updateStartBtn();
+  updateNameSelectHint();
+}
+
+/* 名前を選んだとき：はじめるボタンの文言を変更 */
+function onNameSelect(){
+  updateStartBtn();
+  updateNameSelectHint();
+}
+function updateStartBtn(){
+  const sel = document.getElementById("nameSelect");
+  const btn = document.getElementById("startBtn");
+  if(!sel || !btn) return;
+  const selOpt = sel.options[sel.selectedIndex];
+  if(sel.value && selOpt){
+    btn.textContent = selOpt.textContent + "さんと はじめる";
+  } else {
+    btn.textContent = "はじめる";
+  }
+}
+
+/* 現在選択中のユーザー情報を返す（未選択ならnull） */
+function getSelectedUser(){
+  const sel = document.getElementById("nameSelect");
+  if(!sel || !sel.value) return null;
+  const list = loadNames();
+  return list.find(n => n.id === sel.value) || null;
+}
+
+/* 名前管理画面へ遷移 */
+function goNameScreen(){
+  renderNameList();
+  fadeOut(document.getElementById("startScreen"),()=>{
+    document.getElementById("nameInput").value = "";
+    fadeIn(document.getElementById("nameScreen"));
+  });
+}
+/* 名前管理画面からスタート画面へ戻る */
+function goBackToStart(){
+  fadeOut(document.getElementById("nameScreen"),()=>{
+    refreshNameSelect();
+    fadeIn(document.getElementById("startScreen"));
+  });
+}
+
+/* 名前を追加 */
+function addName(){
+  const input = document.getElementById("nameInput");
+  const name = input.value.trim();
+  if(!name) return;
+  const list = loadNames();
+  list.push({id: genId(), name});
+  saveNames(list);
+  input.value = "";
+  input.focus();
+  renderNameList();
+}
+
+/* 削除確認ダイアログ付きで名前を削除 */
+function confirmDeleteName(id, name){
+  if(!confirm(name + " さんを\n本当に削除しますか？")){return;}
+  deleteName(id);
+}
+function deleteName(id){
+  const list = loadNames().filter(n => n.id !== id);
+  saveNames(list);
+  const sel = document.getElementById("nameSelect");
+  if(sel && sel.value === id){ sel.value = ""; updateStartBtn(); }
+  renderNameList();
+}
+
+/* すべての名前を削除 */
+function confirmDeleteAllNames(){
+  const list = loadNames();
+  if(!list.length) return;
+  if(!confirm("全ての名前を\n本当に削除しますか？")) return;
+  saveNames([]);
+  const sel = document.getElementById("nameSelect");
+  if(sel){ sel.value = ""; updateStartBtn(); }
+  renderNameList();
+}
+
+/* 名前管理画面のリストを再描画 */
+function renderNameList(){
+  const list = loadNames();
+  const ul = document.getElementById("nameList");
+  const countEl = document.getElementById("nameCount");
+  if(countEl) countEl.textContent = list.length ? list.length+"名" : "";
+  if(!ul) return;
+  if(!list.length){
+    ul.innerHTML = '<li class="name-empty">まだ 名前の登録が ありません</li>';
+    return;
+  }
+  ul.innerHTML = list.map(n =>
+    `<li class="name-list-item">
+      <span>${n.name}</span>
+      <button class="name-del-btn" onclick="confirmDeleteName('${n.id}','${n.name}')">削除</button>
+    </li>`
+  ).join("");
+}
+
+/* 結果をGASに送信（名前が選択されている場合） ← 送信内容はここに追加してね */
+function sendResult(){
+  const user = getSelectedUser();
+  if(!user) return; /* 匿名の場合は送信しない */
+  const params = new URLSearchParams();
+  params.append("name", user.name);
+  params.append("uid",  user.id);
+  /* ★ここに送りたいデータを追加してね★ */
+  /* 例: params.append("mood", ans.mood); */
+  const url = NAME_RESULT_URL + "?" + params.toString();
+  if(navigator.sendBeacon){ navigator.sendBeacon(url); }
+  else if(window.fetch){ fetch(url,{mode:"no-cors"}).catch(()=>{}); }
+  else { new Image().src = url; }
+}
+
+/* ページ読み込み完了時：スタート画面の画像をセットしてフェードイン */
+window.addEventListener("load",()=>{
+  const si=document.getElementById("startImg");
+  if(IMG.rainbow){si.src=IMG.rainbow;si.style.display="block";}else{si.style.display="none";}
+  refreshNameSelect();
+  updateNameSelectHint();
+  fadeIn(document.getElementById("startScreen"));
+});
+
+/* はじめるボタンを押したとき：スタート画面をフェードアウトして質問画面へ */
+function startQ(){
+  fadeOut(document.getElementById("startScreen"),()=>{
+    /* 名前バッジを更新 */
+    const user = getSelectedUser();
+    const badge = document.getElementById("quizNameBadge");
+    if(user){
+      badge.textContent = user.name + "さん";
+      badge.style.display = "block";
+    } else {
+      badge.style.display = "none";
+    }
+    cur=0;ans={};renderQ();
+    fadeIn(document.getElementById("quizScreen"));
+  });
+}
+
+/* 現在の質問（cur番目）を画面に描画する。もどるボタンの表示も更新する */
+function renderQ(){
+  busy=false;
+  const q=Qs[cur];
+  document.getElementById("pbar").style.width=(cur/Qs.length*100)+"%";
+  document.getElementById("qtext").textContent=q.text;
+  /* もどるボタン：最初の質問では隠す */
+  const backBtn=document.getElementById("backBtn");
+  if(cur===0){ backBtn.classList.add("hidden"); }else{ backBtn.classList.remove("hidden"); }
+  /* さいしょにもどるボタン：最初の質問のみ表示 */
+  const topBtn=document.getElementById("topBtn");
+  if(cur===0){ topBtn.classList.remove("hidden"); }else{ topBtn.classList.add("hidden"); }
+  const g=document.getElementById("opts");
+  g.innerHTML="";
+  q.opts.forEach(o=>{
+    const b=document.createElement("button");
+    b.className="opt";
+    let iconHtml;
+    if(o.ikey&&IMG[o.ikey]){
+      iconHtml=`<span class="oi"><img src="${IMG[o.ikey]}" width="30" height="30" style="object-fit:contain"></span>`;
+    }else{
+      iconHtml=`<span class="oi"></span>`;
+    }
+    b.innerHTML=iconHtml+`<span class="ol">${o.l}</span>`;
+    b.onclick=()=>selectOpt(o.v,b);
+    g.appendChild(b);
+  });
+}
+
+/* 一つ前の質問に戻る。そのときに記録した回答も消す */
+function goBack(){
+  if(cur<=0||busy)return;
+  delete ans[Qs[cur-1].id];
+  cur--;
+  fadeContent(()=>renderQ());
+}
+
+/* さいしょにもどるボタン：スタート画面に戻る */
+function goTop(){
+  fadeOut(document.getElementById("quizScreen"),()=>{
+    cur=0;ans={};
+    fadeIn(document.getElementById("startScreen"));
+  });
+}
+
+/* 選択肢が押されたとき：回答を記録し、次の質問または結果画面へ進む */
+function selectOpt(val,btn){
+  if(busy)return;
+  busy=true;
+  ans[Qs[cur].id]=val;
+  document.querySelectorAll(".opt").forEach(x=>x.classList.remove("sel"));
+  btn.classList.add("sel");
+  const wait=cssVar('--fade-wait-ms')||320;
+  setTimeout(()=>{
+    cur++;
+    if(cur>=Qs.length){
+      fadeOut(document.getElementById("quizScreen"),()=>showResult());
+    }else{
+      fadeContent(()=>renderQ());
+    }
+  },wait);
+}
+
+/* 結果画面を構築して表示する */
+function showResult(){
+  const mt=ans.mood||"neutral";
+  const d=MD[mt]||MD.neutral;
+  /* 結果画面トップの画像は表示しない */
+  document.getElementById("resicon").innerHTML="";
+  document.getElementById("rttl").textContent=pick(d.ttls);
+  document.getElementById("rdesc").textContent=pick(d.descs);
+  const cce=document.getElementById("cce");
+  if(d.ce_ikey&&IMG[d.ce_ikey]){
+    cce.innerHTML=`<img src="${IMG[d.ce_ikey]}" style="width:var(--center-img-size);height:var(--center-img-size);object-fit:contain">`;
+  }else{
+    cce.innerHTML="";
+  }
+  document.getElementById("cct").textContent=d.ct;
+
+  /* 各回答値に対応する表示用の要約テキスト ← ここを編集してね */
+  const ANS_LABEL = {
+    energy: { high:"げんきいっぱい", mid:"げんきはふつう", low:"つかれている", verylow:"ぐったり" },
+    social: { social:"だれかといたい", alone:"ひとりでいたい", neutral:"ひとりでもみんなでも", unsure:"どうしてたいかわからない" },
+    body:   { heart:"むねがどきどきしてる", breath:"いきぐるしい", bad:"たいちょうがわるい", fine:"からだはへいき" },
+    wish:   { sleep:"ねむりたい", play:"あそびたい", talk:"だれかとはなしたい", nothing:"なにもしたくない" },
+  };
+  /* 4つの要約を「、」でつなげて1行で表示 */
+  const subTagsEl = document.getElementById("subTags");
+  const subIds = ["energy","social","body","wish"];
+  const parts = subIds.map(id => {
+    if(!ans[id]) return "";
+    return (ANS_LABEL[id] && ANS_LABEL[id][ans[id]]) || "";
+  }).filter(s => s !== "");
+  subTagsEl.textContent = parts.join("・");
+  /* 全特効薬を回答との一致度でスコアリングして選択（特効薬画面で使用） */
+  /* スマホ（480px以下）は2×4=8個、PC・タブレットは5×2=10個 */
+  const bubbleCount = window.matchMedia("(max-width:480px)").matches ? 8 : 10;
+  chosenBubbles = selectBubbles(ans, bubbleCount);
+  sendResult();
+  const resUser = getSelectedUser();
+  const resLabel = document.getElementById("resultNameLabel");
+  if(resUser){
+    resLabel.textContent = "いまの " + resUser.name + " さんは";
+    resLabel.style.display = "block";
+  } else {
+    resLabel.style.display = "none";
+  }
+  fadeIn(document.getElementById("resultScreen"));
+}
+
+/* 今の気持ち画面から特効薬画面へ遷移する */
+function showActScreen(){
+  /* 上部テキスト：きもちラベル（もやもや等）＋サブタグ（つかれている・ひとりでいたい等） */
+  document.getElementById("actTtl").textContent  = document.getElementById("cct").textContent;
+  document.getElementById("actDesc").textContent = document.getElementById("subTags").textContent;
+  /* 名前ラベル */
+  const actUser = getSelectedUser();
+  const actNameLabel = document.getElementById("actNameLabel");
+  if(actUser){
+    actNameLabel.textContent = "いまの " + actUser.name + " さんのきもちは";
+    actNameLabel.style.display = "block";
+  } else {
+    actNameLabel.style.display = "none";
+  }
+  fadeOut(document.getElementById("resultScreen"),()=>{
+    fadeIn(document.getElementById("actScreen"));
+    setTimeout(()=>placeBubbles(chosenBubbles),(cssVar('--fade-ms')||300)+50);
+  });
+}
+
+/* 特効薬バブルをグリッドに並べる（PC=5列×2段、スマホ=2列×5段） */
+function placeBubbles(list){
+  const scene=document.getElementById("bscene");
+  scene.querySelectorAll(".bubble").forEach(b=>b.remove());
+
+  const INTERVAL = cssVar('--bubble-feed-ms') || 1200; /* 全バブルが出そろうまでの時間（--bubble-feed-ms で設定） */
+  const slots = list.map((_,i)=>i);
+  for(let k=slots.length-1;k>0;k--){const j=Math.floor(Math.random()*(k+1));[slots[k],slots[j]]=[slots[j],slots[k]];}
+
+  list.forEach((item,i)=>{
+    const el=document.createElement("div");
+    el.className="bubble";
+    const bc = item.g && BC[item.g] ? BC[item.g] : {c:item.c||"#FBEAF0", tc:item.tc||"#72243E"};
+    const imgSrc = item.img ? BASE_ACT + item.img : BASE_ACT + "404.png";
+    const imgHtml = `<img class="bubble-img" src="${imgSrc}" alt="">`;
+    el.innerHTML = imgHtml + `<span class="bubble-txt">${item.t}</span>`;
+    el.style.cssText=`background:${bc.c};color:${bc.tc};cursor:pointer;`;
+    el.onclick = () => openDetail(item);
+    scene.appendChild(el);
+    const delay = (slots[i] / list.length) * INTERVAL + Math.random() * 30;
+    setTimeout(()=>{ requestAnimationFrame(()=>requestAnimationFrame(()=>{ el.style.opacity="1"; })); }, delay);
+  });
+}
+
+/* 特効薬バブルをタップしたとき：詳細画面を表示する */
+let currentDetailItem = null; /* 現在表示中のitemを保持 */
+
+function openDetail(item){
+  currentDetailItem = item;
+  const img = BASE_ACT + (item.img || "404.png");
+  const di = document.getElementById("detailImg");
+  di.src = img;
+  di.style.display = "block";
+  document.getElementById("detailTtl").textContent  = item.t;
+  document.getElementById("detailDesc").textContent = item.desc || "";
+  /* イメージカラーをカードに適用 */
+  const bc = item.g && BC[item.g] ? BC[item.g] : {c:"#FBEAF0", tc:"#72243E"};
+  const card = document.getElementById("detailCard");
+  card.style.setProperty("--detail-bg", bc.c);
+  card.style.setProperty("--detail-tc", bc.tc);
+  /* いいねボタンの状態を復元（同じセッション内で再訪した場合） */
+  const liked = likedSet.has(item.t);
+  const likeBtn = document.getElementById("likeBtn");
+  const likeImg = document.getElementById("likeImg");
+  likeImg.src = liked ? LIKE_IMG_ON : LIKE_IMG_OFF;
+  if(liked){ likeBtn.classList.add("liked"); }else{ likeBtn.classList.remove("liked"); }
+  likeBtn.disabled = liked; /* いいね済みは再押し不可 */
+  fadeOut(document.getElementById("actScreen"),()=>{
+    fadeIn(document.getElementById("detailScreen"));
+  });
+}
+
+/* いいねボタンを押したとき */
+function toggleLike(){
+  if(!currentDetailItem) return;
+  const t = currentDetailItem.t;
+  if(likedSet.has(t)) return;
+
+  likedSet.add(t);
+  const likeBtn = document.getElementById("likeBtn");
+  const likeImg = document.getElementById("likeImg");
+  likeImg.src = LIKE_IMG_ON;
+  likeBtn.classList.add("liked");
+  likeBtn.disabled = true;
+
+  /* 3段構えで送信（WebView環境でも届くよう） */
+  const url = LIKE_FORM_URL + "?title=" + encodeURIComponent(t);
+
+  /* ① sendBeacon（バックグラウンド送信・一番確実） */
+  if(navigator.sendBeacon){
+    navigator.sendBeacon(url);
+  }
+  /* ② fetch（sendBeaconが使えない場合） */
+  else if(window.fetch){
+    fetch(url, {mode:"no-cors"}).catch(()=>{});
+  }
+  /* ③ Image GET（最終手段・WebView等の古い環境向け） */
+  else {
+    new Image().src = url;
+  }
+}
+
+/* 詳細画面のもどるボタン：特効薬画面へ戻る */
+function closeDetail(){
+  fadeOut(document.getElementById("detailScreen"),()=>{
+    document.getElementById("detailScreen").style.background="";
+    fadeIn(document.getElementById("actScreen"));
+  });
+}
+
+/* もう一どやるボタンを押したとき：リセットしてスタート画面へ戻る */
+function restart(){
+  document.getElementById("bscene").querySelectorAll(".bubble").forEach(b=>b.remove());
+  document.getElementById("rttl").textContent="";
+  document.getElementById("rdesc").textContent="";
+  document.getElementById("cce").innerHTML="";
+  document.getElementById("cct").textContent="";
+  document.getElementById("subTags").textContent="";
+  if(document.getElementById("actTtl")) document.getElementById("actTtl").textContent="";
+  if(document.getElementById("actDesc")) document.getElementById("actDesc").textContent="";
+  const rnl=document.getElementById("resultNameLabel"); if(rnl) rnl.style.display="none";
+  const anl=document.getElementById("actNameLabel"); if(anl) anl.style.display="none";
+  chosenBubbles=[];
+  likedSet.clear(); /* もういちど押したらいいね状態をリセット */
+  const current =
+    document.getElementById("detailScreen").classList.contains("active")
+      ? document.getElementById("detailScreen")
+      : document.getElementById("actScreen").classList.contains("active")
+        ? document.getElementById("actScreen")
+        : document.getElementById("resultScreen");
+  document.getElementById("detailScreen").style.background="";
+  fadeOut(current,()=>{ cur=0;ans={}; fadeIn(document.getElementById("startScreen")); });
+}
+</script>
+</body>
+</html>
