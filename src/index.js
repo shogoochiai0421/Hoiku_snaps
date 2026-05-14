@@ -124,7 +124,7 @@ async function handleThread(env, slug, threadId) {
     <h2>返信する</h2>
     <form method="POST" action="/${escape(slug)}/${threadId}/reply">
       <input name="author_name" placeholder="名前ああああ（省略で名無しさん）">
-      <textarea name="body" rows="4" placeholder="本文あああああ（必須）" required></textarea>
+      <textarea name="body" rows="4" placeholder="本文ああああああ（必須）" required></textarea>
       <input name="delete_password" placeholder="削除パスワード（任意）" type="password">
       <button type="submit">返信する</button>
     </form>`;
