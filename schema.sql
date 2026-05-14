@@ -1,0 +1,40 @@
+CREATE TABLE IF NOT EXISTS boards (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  slug TEXT UNIQUE NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS threads (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  board_id INTEGER NOT NULL REFERENCES boards(id) ON DELETE CASCADE,
+  title TEXT NOT NULL,
+  author_name TEXT DEFAULT '名無しさん',
+  body TEXT NOT NULL,
+  ip_address TEXT,
+  delete_password TEXT,
+  last_replied_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS posts (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  thread_id INTEGER NOT NULL REFERENCES threads(id) ON DELETE CASCADE,
+  author_name TEXT DEFAULT '名無しさん',
+  body TEXT NOT NULL,
+  ip_address TEXT,
+  delete_password TEXT,
+  is_deleted INTEGER DEFAULT 0,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS ng_words (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  word TEXT UNIQUE NOT NULL,
+  created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+);
+
+INSERT OR IGNORE INTO boards (slug, name, description) VALUES
+  ('general', '雑談', '何でも自由に話しましょう'),
+  ('tech', '技術', '技術的な話題はこちら');
