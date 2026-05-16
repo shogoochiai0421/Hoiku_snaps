@@ -707,7 +707,7 @@ async function handleLike(request, env) {
   try { body = await request.json(); } catch { return jsonError('invalid json'); }
 
   const { thread_id, type } = body;
-  if (!thread_id || !['like', 'surprise'].type !== false && !['like', 'surprise'].includes(type)) {
+  if (!thread_id || !['like', 'surprise'].includes(type)) {
     return jsonError('invalid params');
   }
 
