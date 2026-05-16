@@ -74,6 +74,9 @@ function html(title, body, head = '') {
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>${esc(title)}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+Antique:wght@400;700&display=swap" rel="stylesheet">
 ${head}
 <style>${CSS}</style>
 </head>
@@ -103,13 +106,14 @@ const PAGE_SIZE = 20;
 
 const CSS = `
 *{box-sizing:border-box;margin:0;padding:0}
-body{background:#faf8f2;color:#333;font-family:'Hiragino Kaku Gothic ProN','メイリオ',sans-serif;min-height:100vh}
+body{background:#faf8f2;color:#333;font-family:'Zen Kaku Gothic Antique','Hiragino Kaku Gothic ProN','メイリオ',sans-serif;min-height:100vh}
 a{color:inherit;text-decoration:none}
 
 .header{background:#faf8f2;border-bottom:1px solid #e8e0d0;padding:.6rem 1.5rem;display:flex;align-items:center;gap:.75rem;position:sticky;top:0;z-index:100}
 .logo{width:160px;height:44px;flex-shrink:0;background:#f0ead8;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:.72rem}
-.search-wrap{flex:1;display:flex;align-items:center;background:#fff;border:1px solid #e0d8c8;border-radius:20px;padding:.35rem .9rem;gap:.4rem;max-width:400px}
+.search-wrap{flex:1;display:flex;align-items:center;background:#fff;border:1px solid #e0d8c8;border-radius:20px;padding:.35rem .9rem;gap:.4rem;max-width:480px;margin:0 auto}
 .search-wrap input{border:none;outline:none;width:100%;background:transparent;font-size:.88rem}
+.search-btn{border:none;background:#f5c842;color:#333;border-radius:12px;padding:.2rem .7rem;font-size:.78rem;cursor:pointer;white-space:nowrap;font-weight:700;flex-shrink:0}
 .btn-post{background:#f5c842;color:#333;border:none;border-radius:20px;padding:.45rem 1.1rem;font-size:.88rem;cursor:pointer;white-space:nowrap;font-weight:700;margin-left:auto}
 .btn-post:hover{background:#e8b800}
 
@@ -136,8 +140,9 @@ a{color:inherit;text-decoration:none}
 .sidebar-box{background:#fff;border:1px solid #ede8dc;border-radius:8px;padding:.9rem;margin-bottom:.9rem}
 .sidebar-title{font-size:.78rem;font-weight:700;color:#999;margin-bottom:.65rem;letter-spacing:.05em}
 .tag-list{display:flex;flex-wrap:wrap;gap:5px}
-.tag-link{background:#f5f0e8;color:#666;padding:3px 9px;border-radius:12px;font-size:.75rem;cursor:pointer}
+.tag-link{background:#f5f0e8;color:#666;padding:3px 9px;border-radius:12px;font-size:.75rem;cursor:pointer;text-decoration:none;display:inline-block}
 .tag-link:hover{background:#ede8dc}
+.tag-selected{background:#f5c842!important;color:#333!important;font-weight:700}
 
 .pagination{display:flex;justify-content:center;gap:.5rem;margin:1.25rem 0}
 .pagination a,.pagination span{padding:.35rem .75rem;border:1px solid #e0d8c8;border-radius:6px;font-size:.82rem;color:#555}
@@ -319,14 +324,31 @@ function renderPostModal(tags) {
 // サイドバー
 // =============================================
 
-function renderSidebar(tags) {
-  const tagLinks = tags.map(t =>
-    `<span class="tag-link" onclick="location.href='/?tag=${encodeURIComponent(t.name)}'">#${esc(t.name)}</span>`
-  ).join('');
+function renderSidebar(tags, selectedTags = []) {
+  const selectedNames = selectedTags.map(t => t.name);
+  const tagLinks = tags.map(t => {
+    const isSelected = selectedNames.includes(t.name);
+    let newSelected;
+    if (isSelected) {
+      newSelected = selectedNames.filter(n => n !== t.name);
+    } else {
+      newSelected = [...selectedNames, t.name];
+    }
+    const href = newSelected.length > 0
+      ? '/?tags=' + encodeURIComponent(newSelected.join(','))
+      : '/';
+    return `<a class="tag-link${isSelected ? ' tag-selected' : ''}" href="${href}">#${esc(t.name)}</a>`;
+  }).join('');
+
+  const clearLink = selectedNames.length > 0
+    ? `<a href="/" style="font-size:.72rem;color:#aaa;display:block;margin-bottom:.5rem">✕ タグ選択を解除</a>`
+    : '';
+
   return `
 <aside class="sidebar">
   <div class="sidebar-box">
-    <div class="sidebar-title">タグ一覧</div>
+    <div class="sidebar-title">タグ一覧（複数選択可）</div>
+    ${clearLink}
     <div class="tag-list">${tagLinks}</div>
   </div>
 </aside>`;
@@ -463,23 +485,58 @@ async function sendReaction(threadId, type){
 async function handleTop(env, url) {
   const page = parseInt(url.searchParams.get('page') || '1');
   const sort = url.searchParams.get('sort') || 'new';
-  const tag = url.searchParams.get('tag') || '';
+  const tag = url.searchParams.get('tags') || '';  // カンマ区切りタグ名
+  const searchQuery = (url.searchParams.get('q') || '').trim();
   const offset = (page - 1) * PAGE_SIZE;
   const orderBy = sort === 'popular' ? 't.likes DESC' : 't.created_at DESC';
 
   const { results: tags } = await env.DB.prepare('SELECT * FROM tags ORDER BY name').all();
 
+  // 選択中のタグ名リスト
+  const selectedTagNames = tag ? tag.split(',').map(s => s.trim()).filter(Boolean) : [];
+  const selectedTags = tags.filter(t => selectedTagNames.includes(t.name));
+
   let threads;
-  if (tag) {
+  if (searchQuery && selectedTagNames.length > 0) {
+    // 検索 + タグフィルター
+    const placeholders = selectedTagNames.map(() => '?').join(',');
     const { results } = await env.DB.prepare(`
       SELECT t.*, GROUP_CONCAT(tg.name) as tag_names
       FROM threads t
       JOIN thread_tags tt2 ON tt2.thread_id = t.id
-      JOIN tags tg2 ON tg2.id = tt2.tag_id AND tg2.name = ?
+      JOIN tags tg2 ON tg2.id = tt2.tag_id AND tg2.name IN (${placeholders})
       LEFT JOIN thread_tags tt ON tt.thread_id = t.id
       LEFT JOIN tags tg ON tg.id = tt.tag_id
+      WHERE t.body LIKE ? OR tg2.name LIKE ?
       GROUP BY t.id ORDER BY ${orderBy} LIMIT ? OFFSET ?
-    `).bind(tag, PAGE_SIZE + 1, offset).all();
+    `).bind(...selectedTagNames, '%'+searchQuery+'%', '%'+searchQuery+'%', PAGE_SIZE + 1, offset).all();
+    threads = results;
+  } else if (selectedTagNames.length > 0) {
+    // タグフィルターのみ（複数タグはAND条件）
+    const placeholders = selectedTagNames.map(() => '?').join(',');
+    const { results } = await env.DB.prepare(`
+      SELECT t.*, GROUP_CONCAT(tg.name) as tag_names,
+        COUNT(DISTINCT tg2.id) as matched_tags
+      FROM threads t
+      JOIN thread_tags tt2 ON tt2.thread_id = t.id
+      JOIN tags tg2 ON tg2.id = tt2.tag_id AND tg2.name IN (${placeholders})
+      LEFT JOIN thread_tags tt ON tt.thread_id = t.id
+      LEFT JOIN tags tg ON tg.id = tt.tag_id
+      GROUP BY t.id
+      HAVING matched_tags = ${selectedTagNames.length}
+      ORDER BY ${orderBy} LIMIT ? OFFSET ?
+    `).bind(...selectedTagNames, PAGE_SIZE + 1, offset).all();
+    threads = results;
+  } else if (searchQuery) {
+    // テキスト検索のみ（本文 OR タグ名）
+    const { results } = await env.DB.prepare(`
+      SELECT t.*, GROUP_CONCAT(tg.name) as tag_names
+      FROM threads t
+      LEFT JOIN thread_tags tt ON tt.thread_id = t.id
+      LEFT JOIN tags tg ON tg.id = tt.tag_id
+      WHERE t.body LIKE ? OR tg.name LIKE ?
+      GROUP BY t.id ORDER BY ${orderBy} LIMIT ? OFFSET ?
+    `).bind('%'+searchQuery+'%', '%'+searchQuery+'%', PAGE_SIZE + 1, offset).all();
     threads = results;
   } else {
     const { results } = await env.DB.prepare(`
@@ -494,31 +551,27 @@ async function handleTop(env, url) {
 
   const hasNext = threads.length > PAGE_SIZE;
   const items = threads.slice(0, PAGE_SIZE);
-  const baseUrl = tag ? `/?tag=${encodeURIComponent(tag)}&sort=${sort}` : `/?sort=${sort}`;
+  const tagParam = selectedTagNames.length > 0 ? '&tags=' + encodeURIComponent(selectedTagNames.join(',')) : '';
+  const qParam = searchQuery ? '&q=' + encodeURIComponent(searchQuery) : '';
+  const baseUrl = `/?sort=${sort}${tagParam}${qParam}`;
 
   const cards = items.map(renderCard).join('') ||
     '<p style="color:#bbb;text-align:center;padding:2rem">まだ投稿がありません</p>';
 
   const body = `
-<header class="header">
-  <div class="logo"><!-- ロゴ画像 --></div>
-  <div class="search-wrap">
-    <span>🔍</span>
-    <input type="text" placeholder="投稿を検索" id="search-input">
-  </div>
-  <a class="btn-post" href="/post">＋ 投稿する</a>
-</header>
+${renderHeader(searchQuery)}
 <div class="container">
   <main class="main">
-    ${tag ? `<p style="margin-bottom:.65rem;font-size:.82rem;color:#888">#${esc(tag)} の投稿 <a href="/" style="color:#bbb;margin-left:.4rem">✕ 解除</a></p>` : ''}
+    ${searchQuery ? `<p style="margin-bottom:.65rem;font-size:.82rem;color:#888">「${esc(searchQuery)}」の検索結果 <a href="/" style="color:#bbb;margin-left:.4rem">✕ 解除</a></p>` : ''}
+    ${tag ? `<p style="margin-bottom:.65rem;font-size:.82rem;color:#888">${selectedTagNames.map(n=>'#'+esc(n)).join(' ')} の投稿 <a href="/" style="color:#bbb;margin-left:.4rem">✕ 解除</a></p>` : ''}
     <div class="tabs">
-      <a class="tab${sort !== 'popular' ? ' active' : ''}" href="/?sort=new${tag ? '&tag=' + encodeURIComponent(tag) : ''}">新着</a>
-      <a class="tab${sort === 'popular' ? ' active' : ''}" href="/?sort=popular${tag ? '&tag=' + encodeURIComponent(tag) : ''}">人気</a>
+      <a class="tab${sort !== 'popular' ? ' active' : ''}" href="/?sort=new${tag ? '&tags=' + encodeURIComponent(tag) : ''}${searchQuery ? '&q=' + encodeURIComponent(searchQuery) : ''}">新着</a>
+      <a class="tab${sort === 'popular' ? ' active' : ''}" href="/?sort=popular${tag ? '&tags=' + encodeURIComponent(tag) : ''}${searchQuery ? '&q=' + encodeURIComponent(searchQuery) : ''}">人気</a>
     </div>
     ${cards}
     ${pagination(page, hasNext, baseUrl)}
   </main>
-  ${renderSidebar(tags)}
+  ${renderSidebar(tags, selectedTags)}
 </div>
 ${renderPostModal(tags)}
 ${clientJS(tags)}`;
@@ -543,23 +596,18 @@ async function handleThread(env, url, threadId) {
     .filter(Boolean).map(a => `<span class="attr-chip">${esc(a)}</span>`).join('');
   const tagChips = threadTags.map(t => `<span class="tag-chip" style="cursor:pointer" onclick="location.href='/?tag=${encodeURIComponent(t.name)}'">#${esc(t.name)}</span>`).join('');
 
+  const attrText = [thread.place, thread.child_age, thread.poster_age, thread.poster_gender, thread.poster_role]
+    .filter(Boolean).join(' ');
+
   const body = `
-<header class="header">
-  <div class="logo"><!-- ロゴ画像 --></div>
-  <div class="search-wrap">
-    <span>🔍</span>
-    <input type="text" placeholder="投稿を検索">
-  </div>
-  <a class="btn-post" href="/post">＋ 投稿する</a>
-</header>
+${renderHeader()}
 <div class="container">
   <main class="main">
     <div class="breadcrumb"><a href="/">← 一覧に戻る</a></div>
     <div class="thread-detail">
       <div class="thread-body">${esc(thread.body)}</div>
-      ${attrs ? `<div class="thread-attrs">${attrs}</div>` : ''}
       ${tagChips ? `<div class="thread-tags">${tagChips}</div>` : ''}
-      <div style="font-size:.75rem;color:#bbb;margin-bottom:.5rem">${timeAgo(thread.created_at)}</div>
+      <div style="font-size:.75rem;color:#bbb;margin-bottom:.75rem">${timeAgo(thread.created_at)}</div>
       <div class="reactions-bar">
         <button class="reaction-btn" data-reaction="like" onclick="sendReaction(${thread.id},'like')">
           😊 <span data-count="like">${thread.likes || 0}</span>
@@ -567,6 +615,7 @@ async function handleThread(env, url, threadId) {
         <button class="reaction-btn" data-reaction="surprise" onclick="sendReaction(${thread.id},'surprise')">
           😲 <span data-count="surprise">${thread.surprises || 0}</span>
         </button>
+        ${attrText ? `<span style="font-size:.78rem;color:#bbb;margin-left:.5rem;align-self:center">${esc(attrText)}</span>` : ''}
       </div>
     </div>
   </main>
@@ -591,14 +640,7 @@ async function handlePostPage(env, url) {
   ).join('');
 
   const body = `
-<header class="header">
-  <div class="logo"><!-- ロゴ画像 --></div>
-  <div class="search-wrap">
-    <span>🔍</span>
-    <input type="text" placeholder="投稿を検索">
-  </div>
-  <a class="btn-post" href="/">← 一覧へ</a>
-</header>
+${renderHeader()}
 <div style="max-width:640px;margin:1.5rem auto;padding:0 1rem">
   <h1 style="font-size:1.05rem;margin-bottom:1.25rem;color:#555">新しい投稿</h1>
   <form method="POST" action="/new" style="background:#fff;border:1px solid #ede8dc;border-radius:10px;padding:1.5rem">
