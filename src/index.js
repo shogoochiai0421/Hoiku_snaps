@@ -32,6 +32,7 @@ export default {
 
       // 一般ルート
       if (path === '/' && method === 'GET') return handleTop(env, url);
+      if (path === '/post' && method === 'GET') return handlePostPage(env, url);
       if (path === '/new' && method === 'POST') return handleNewThread(request, env);
       if (path.match(/^\/\d+$/) && method === 'GET') return handleThread(env, url, path.slice(1));
       if (path === '/api/like' && method === 'POST') return handleLike(request, env);
@@ -505,7 +506,7 @@ async function handleTop(env, url) {
     <span>🔍</span>
     <input type="text" placeholder="投稿を検索" id="search-input">
   </div>
-  <button class="btn-post" onclick="openModal()">＋ 投稿する</button>
+  <a class="btn-post" href="/post">＋ 投稿する</a>
 </header>
 <div class="container">
   <main class="main">
@@ -549,7 +550,7 @@ async function handleThread(env, url, threadId) {
     <span>🔍</span>
     <input type="text" placeholder="投稿を検索">
   </div>
-  <button class="btn-post" onclick="openModal()">＋ 投稿する</button>
+  <a class="btn-post" href="/post">＋ 投稿する</a>
 </header>
 <div class="container">
   <main class="main">
@@ -575,6 +576,122 @@ ${renderPostModal(tags)}
 ${clientJS(tags)}`;
 
   return html(thread.body.slice(0, 30) + '...', body);
+}
+
+
+// =============================================
+// 投稿専用ページ
+// =============================================
+
+async function handlePostPage(env, url) {
+  const { results: tags } = await env.DB.prepare('SELECT * FROM tags ORDER BY name').all();
+
+  const tagOptions = tags.map(t =>
+    `<option value="${t.id}">${esc(t.name)}</option>`
+  ).join('');
+
+  const body = `
+<header class="header">
+  <div class="logo"><!-- ロゴ画像 --></div>
+  <div class="search-wrap">
+    <span>🔍</span>
+    <input type="text" placeholder="投稿を検索">
+  </div>
+  <a class="btn-post" href="/">← 一覧へ</a>
+</header>
+<div style="max-width:640px;margin:1.5rem auto;padding:0 1rem">
+  <h1 style="font-size:1.05rem;margin-bottom:1.25rem;color:#555">新しい投稿</h1>
+  <form method="POST" action="/new" style="background:#fff;border:1px solid #ede8dc;border-radius:10px;padding:1.5rem">
+    <div class="form-group full">
+      <label>本文（必須）</label>
+      <textarea name="body" id="post-body" rows="6" required placeholder="相談・経験談などを自由に書いてください" oninput="onBodyInput(this.value)"></textarea>
+    </div>
+    <div class="form-grid">
+      <div class="form-group">
+        <label>場所</label>
+        <select name="place">
+          <option value="">選択しない</option>
+          <option>保育園</option>
+          <option>幼稚園</option>
+          <option>認定こども園</option>
+          <option>小学校</option>
+          <option>学童保育</option>
+          <option>放課後児童支援</option>
+          <option>家庭</option>
+          <option>その他</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>子どもの年齢</label>
+        <select name="child_age">
+          <option value="">選択しない</option>
+          <option>0歳</option>
+          <option>1歳</option>
+          <option>2歳</option>
+          <option>3歳</option>
+          <option>4歳</option>
+          <option>5歳</option>
+          <option>6歳以上</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>投稿者の年代</label>
+        <select name="poster_age">
+          <option value="">選択しない</option>
+          <option>10代</option>
+          <option>20代</option>
+          <option>30代</option>
+          <option>40代</option>
+          <option>50代以上</option>
+        </select>
+      </div>
+      <div class="form-group">
+        <label>性別</label>
+        <select name="poster_gender">
+          <option value="">選択しない</option>
+          <option>男性</option>
+          <option>女性</option>
+          <option>その他</option>
+        </select>
+      </div>
+      <div class="form-group full">
+        <label>立場</label>
+        <select name="poster_role">
+          <option value="">選択しない</option>
+          <option>保育士</option>
+          <option>幼稚園教諭</option>
+          <option>保育補助</option>
+          <option>学童支援員</option>
+          <option>保護者</option>
+          <option>学生</option>
+          <option>その他</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group full">
+      <label>タグ</label>
+      <div class="tag-search-bar">
+        <span>🏷</span>
+        <input type="text" id="tag-search" placeholder="タグを検索..." oninput="searchTags(this.value)">
+      </div>
+      <div class="attached-tags" id="attached-tags"></div>
+      <div id="suggest-area" style="display:none;margin-bottom:.4rem">
+        <div class="suggest-label">📌 おすすめタグ</div>
+        <div class="tag-candidates" id="suggest-tags"></div>
+      </div>
+      <div class="tag-candidates" id="tag-candidates"></div>
+      <input type="hidden" name="tag_ids" id="tag-ids-input">
+    </div>
+    <div class="form-group full">
+      <label>削除パスワード（任意）</label>
+      <input name="delete_password" type="password" placeholder="後で削除したいときに使います">
+    </div>
+    <button class="btn-submit" type="submit">投稿する</button>
+  </form>
+</div>
+${clientJS(tags)}`;
+
+  return html('投稿する | 保育士・子育て掲示板', body);
 }
 
 // =============================================
@@ -604,7 +721,7 @@ async function handleNewThread(request, env) {
     await env.DB.prepare('INSERT OR IGNORE INTO thread_tags (thread_id,tag_id) VALUES (?,?)').bind(threadId, tagId).run();
   }
 
-  return Response.redirect(`/${threadId}`, 303);
+  return Response.redirect(`${new URL(request.url).origin}/${threadId}`, 303);
 }
 
 // =============================================
@@ -678,13 +795,13 @@ function adminLayout(title, body) {
 
 async function requireAdmin(request, env) {
   const session = await getAdminSession(request, env);
-  if (!session) return Response.redirect('/admin', 302);
+  if (!session) return Response.redirect(new URL(request.url).origin + '/admin', 302);
   return null;
 }
 
 async function adminLogin(request, env) {
   const session = await getAdminSession(request, env);
-  if (session) return Response.redirect('/admin/tags', 302);
+  if (session) return Response.redirect(new URL(request.url).origin + '/admin/tags', 302);
   return adminLayout('管理者ログイン', `
     <div class="admin-login">
       <h1>🔐 管理者ログイン</h1>
@@ -760,14 +877,14 @@ async function adminAddTag(request, env) {
   const form = await request.formData();
   const name = (form.get('name') ?? '').trim();
   if (name) await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(name).run();
-  return Response.redirect('/admin/tags', 302);
+  return Response.redirect(new URL(request.url).origin + '/admin/tags', 302);
 }
 
 async function adminDeleteTag(request, env, tagId) {
   const redirect = await requireAdmin(request, env);
   if (redirect) return redirect;
   await env.DB.prepare('DELETE FROM tags WHERE id=?').bind(tagId).run();
-  return Response.redirect('/admin/tags', 302);
+  return Response.redirect(new URL(request.url).origin + '/admin/tags', 302);
 }
 
 async function adminKeywords(request, env, tagId) {
@@ -812,7 +929,7 @@ async function adminAddKeyword(request, env, tagId) {
   const form = await request.formData();
   const keyword = (form.get('keyword') ?? '').trim();
   if (keyword) await env.DB.prepare('INSERT OR IGNORE INTO tag_keywords (tag_id,keyword) VALUES (?,?)').bind(tagId, keyword).run();
-  return Response.redirect(`/admin/tags/${tagId}/keywords`, 302);
+  return Response.redirect(new URL(request.url).origin + `/admin/tags/${tagId}/keywords`, 302);
 }
 
 async function adminDeleteKeyword(request, env, keywordId) {
@@ -820,5 +937,5 @@ async function adminDeleteKeyword(request, env, keywordId) {
   if (redirect) return redirect;
   const kw = await env.DB.prepare('SELECT tag_id FROM tag_keywords WHERE id=?').bind(keywordId).first();
   await env.DB.prepare('DELETE FROM tag_keywords WHERE id=?').bind(keywordId).run();
-  return Response.redirect(`/admin/tags/${kw?.tag_id}/keywords`, 302);
+  return Response.redirect(new URL(request.url).origin + `/admin/tags/${kw?.tag_id}/keywords`, 302);
 }
