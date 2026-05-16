@@ -2,25 +2,46 @@
 // 保育士・子育て向け掲示板 - Cloudflare Worker
 // =============================================
 
+const ADMIN_PASSWORD = 'admin1234'; // ← 必ず変更してください
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
     const path = url.pathname;
     const method = request.method;
 
-    // ルーティング
-    if (path === '/' && method === 'GET') return handleTop(env, url);
-    if (path === '/api/like' && method === 'POST') return handleLike(request, env);
-    if (path.match(/^\/[a-z0-9_-]+$/) && method === 'GET') return handleBoard(env, url, path.slice(1));
-    if (path.match(/^\/[a-z0-9_-]+\/\d+$/) && method === 'GET') {
-      const [, slug, threadId] = path.split('/');
-      return handleThread(env, slug, threadId);
-    }
-    if (path.match(/^\/[a-z0-9_-]+\/new$/) && method === 'POST') {
-      return handleNewThread(request, env, path.split('/')[1]);
-    }
+    try {
+      // 管理者ルート
+      if (path === '/admin' || path === '/admin/') return adminLogin(request, env);
+      if (path === '/admin/login' && method === 'POST') return adminDoLogin(request, env);
+      if (path === '/admin/logout') return adminLogout(request, env);
+      if (path === '/admin/tags' && method === 'GET') return adminTags(request, env);
+      if (path === '/admin/tags' && method === 'POST') return adminAddTag(request, env);
+      if (path.match(/^\/admin\/tags\/\d+\/delete$/) && method === 'POST') {
+        return adminDeleteTag(request, env, path.split('/')[3]);
+      }
+      if (path.match(/^\/admin\/tags\/\d+\/keywords$/) && method === 'GET') {
+        return adminKeywords(request, env, path.split('/')[3]);
+      }
+      if (path.match(/^\/admin\/tags\/\d+\/keywords$/) && method === 'POST') {
+        return adminAddKeyword(request, env, path.split('/')[3]);
+      }
+      if (path.match(/^\/admin\/keywords\/\d+\/delete$/) && method === 'POST') {
+        return adminDeleteKeyword(request, env, path.split('/')[3]);
+      }
 
-    return new Response('Not Found', { status: 404 });
+      // 一般ルート
+      if (path === '/' && method === 'GET') return handleTop(env, url);
+      if (path === '/new' && method === 'POST') return handleNewThread(request, env);
+      if (path.match(/^\/\d+$/) && method === 'GET') return handleThread(env, url, path.slice(1));
+      if (path === '/api/like' && method === 'POST') return handleLike(request, env);
+      if (path === '/api/suggest-tags' && method === 'POST') return handleSuggestTags(request, env);
+
+      return new Response('Not Found', { status: 404 });
+    } catch (e) {
+      console.error(e);
+      return new Response('Internal Server Error: ' + e.message, { status: 500 });
+    }
   }
 };
 
@@ -28,7 +49,7 @@ export default {
 // ユーティリティ
 // =============================================
 
-function escape(str) {
+function esc(str) {
   return String(str ?? '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -45,6 +66,34 @@ function timeAgo(dateStr) {
   return `${Math.floor(diff / 86400 / 30)}ヶ月前`;
 }
 
+function html(title, body, head = '') {
+  return new Response(`<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>${esc(title)}</title>
+${head}
+<style>${CSS}</style>
+</head>
+<body>
+${body}
+</body>
+</html>`, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+}
+
+async function getAdminSession(request, env) {
+  const cookie = request.headers.get('Cookie') || '';
+  const match = cookie.match(/admin_session=([^;]+)/);
+  if (!match) return null;
+  const session = await env.DB.prepare('SELECT * FROM admin_sessions WHERE id = ?').bind(match[1]).first();
+  return session;
+}
+
+function setCookie(name, value, maxAge = 86400) {
+  return `${name}=${value}; Path=/; HttpOnly; SameSite=Strict; Max-Age=${maxAge}`;
+}
+
 const PAGE_SIZE = 20;
 
 // =============================================
@@ -52,358 +101,118 @@ const PAGE_SIZE = 20;
 // =============================================
 
 const CSS = `
-* { box-sizing: border-box; margin: 0; padding: 0; }
-body { background: #faf8f2; color: #333; font-family: 'Hiragino Kaku Gothic ProN', 'メイリオ', sans-serif; min-height: 100vh; }
-a { color: inherit; text-decoration: none; }
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#faf8f2;color:#333;font-family:'Hiragino Kaku Gothic ProN','メイリオ',sans-serif;min-height:100vh}
+a{color:inherit;text-decoration:none}
 
-/* ヘッダー */
-.header {
-  background: #faf8f2;
-  border-bottom: 1px solid #e8e0d0;
-  padding: 0.75rem 1.5rem;
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  position: sticky;
-  top: 0;
-  z-index: 100;
-}
-.logo {
-  width: 160px;
-  height: 48px;
-  flex-shrink: 0;
-  background: #f0ead8;
-  border-radius: 8px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  color: #aaa;
-  font-size: 0.75rem;
-  /* ロゴ画像を入れる場合: background-image: url('/logo.png'); background-size: contain; background-repeat: no-repeat; */
-}
-.search-wrap {
-  flex: 1;
-  display: flex;
-  align-items: center;
-  background: #fff;
-  border: 1px solid #e0d8c8;
-  border-radius: 20px;
-  padding: 0.4rem 1rem;
-  gap: 0.5rem;
-  max-width: 420px;
-}
-.search-wrap input {
-  border: none;
-  outline: none;
-  width: 100%;
-  background: transparent;
-  font-size: 0.9rem;
-}
-.btn-post {
-  background: #f5c842;
-  color: #333;
-  border: none;
-  border-radius: 20px;
-  padding: 0.5rem 1.2rem;
-  font-size: 0.9rem;
-  cursor: pointer;
-  white-space: nowrap;
-  font-weight: bold;
-  margin-left: auto;
-}
-.btn-post:hover { background: #e8b800; }
+.header{background:#faf8f2;border-bottom:1px solid #e8e0d0;padding:.6rem 1.5rem;display:flex;align-items:center;gap:.75rem;position:sticky;top:0;z-index:100}
+.logo{width:160px;height:44px;flex-shrink:0;background:#f0ead8;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#bbb;font-size:.72rem}
+.search-wrap{flex:1;display:flex;align-items:center;background:#fff;border:1px solid #e0d8c8;border-radius:20px;padding:.35rem .9rem;gap:.4rem;max-width:400px}
+.search-wrap input{border:none;outline:none;width:100%;background:transparent;font-size:.88rem}
+.btn-post{background:#f5c842;color:#333;border:none;border-radius:20px;padding:.45rem 1.1rem;font-size:.88rem;cursor:pointer;white-space:nowrap;font-weight:700;margin-left:auto}
+.btn-post:hover{background:#e8b800}
 
-/* レイアウト */
-.container {
-  display: flex;
-  max-width: 1000px;
-  margin: 0 auto;
-  padding: 1rem;
-  gap: 1rem;
-  align-items: flex-start;
-}
-.main { flex: 1; min-width: 0; }
-.sidebar { width: 220px; flex-shrink: 0; position: sticky; top: 72px; }
+.container{display:flex;max-width:1000px;margin:0 auto;padding:1rem;gap:1rem;align-items:flex-start}
+.main{flex:1;min-width:0}
+.sidebar{width:210px;flex-shrink:0;position:sticky;top:68px}
 
-/* タブ */
-.tabs {
-  display: flex;
-  border-bottom: 2px solid #e8e0d0;
-  margin-bottom: 1rem;
-}
-.tab {
-  padding: 0.5rem 1.5rem;
-  cursor: pointer;
-  color: #888;
-  font-size: 0.9rem;
-  border-bottom: 2px solid transparent;
-  margin-bottom: -2px;
-  text-decoration: none;
-  display: block;
-}
-.tab.active {
-  color: #333;
-  border-bottom-color: #f5c842;
-  font-weight: bold;
-}
-.tab:hover { color: #555; }
+.tabs{display:flex;border-bottom:2px solid #e8e0d0;margin-bottom:1rem}
+.tab{padding:.45rem 1.25rem;cursor:pointer;color:#888;font-size:.88rem;border-bottom:2px solid transparent;margin-bottom:-2px;display:block}
+.tab.active{color:#333;border-bottom-color:#f5c842;font-weight:700}
+.tab:hover{color:#555}
 
-/* カード */
-.card {
-  background: #fff;
-  border: 1px solid #ede8dc;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 0.75rem;
-  cursor: pointer;
-  transition: box-shadow 0.15s;
-}
-.card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.08); }
-.card-title { font-size: 0.95rem; font-weight: bold; margin-bottom: 0.4rem; }
-.card-body {
-  font-size: 0.85rem;
-  color: #555;
-  margin-bottom: 0.6rem;
-  line-height: 1.5;
-  display: -webkit-box;
-  -webkit-line-clamp: 3;
-  -webkit-box-orient: vertical;
-  overflow: hidden;
-}
-.card-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 0.5rem; }
-.tag-chip {
-  background: #fff3cd;
-  color: #856404;
-  padding: 2px 8px;
-  border-radius: 10px;
-  font-size: 0.72rem;
-}
-.card-meta {
-  font-size: 0.78rem;
-  color: #aaa;
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  flex-wrap: wrap;
-}
-.card-board { color: #888; }
-.card-reactions { margin-left: auto; display: flex; gap: 0.75rem; }
-.reaction { display: flex; align-items: center; gap: 3px; font-size: 0.78rem; color: #aaa; }
+.card{background:#fff;border:1px solid #ede8dc;border-radius:8px;padding:1rem;margin-bottom:.65rem;cursor:pointer;transition:box-shadow .15s}
+.card:hover{box-shadow:0 2px 8px rgba(0,0,0,.08)}
+.card-body{font-size:.88rem;color:#444;line-height:1.6;margin-bottom:.6rem;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;white-space:pre-wrap}
+.card-attrs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:.5rem}
+.attr-chip{background:#f0ead8;color:#6b5a3e;padding:2px 8px;border-radius:10px;font-size:.72rem}
+.card-tags{display:flex;flex-wrap:wrap;gap:4px;margin-bottom:.5rem}
+.tag-chip{background:#fff3cd;color:#856404;padding:2px 8px;border-radius:10px;font-size:.72rem}
+.card-meta{font-size:.75rem;color:#bbb;display:flex;align-items:center;gap:.6rem}
+.card-reactions{margin-left:auto;display:flex;gap:.5rem}
+.reaction{display:flex;align-items:center;gap:3px;font-size:.75rem;color:#bbb}
 
-/* サイドバー */
-.sidebar-box {
-  background: #fff;
-  border: 1px solid #ede8dc;
-  border-radius: 8px;
-  padding: 1rem;
-  margin-bottom: 1rem;
-}
-.sidebar-title { font-size: 0.82rem; font-weight: bold; color: #888; margin-bottom: 0.75rem; letter-spacing: 0.05em; }
-.board-link {
-  display: block;
-  padding: 0.35rem 0;
-  font-size: 0.85rem;
-  color: #555;
-  border-bottom: 1px solid #f5f0e8;
-}
-.board-link:last-child { border-bottom: none; }
-.board-link:hover { color: #333; }
-.board-link.active { color: #333; font-weight: bold; }
-.tag-list { display: flex; flex-wrap: wrap; gap: 6px; }
-.tag-link {
-  background: #f5f0e8;
-  color: #666;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 0.78rem;
-  cursor: pointer;
-}
-.tag-link:hover { background: #ede8dc; }
+.sidebar-box{background:#fff;border:1px solid #ede8dc;border-radius:8px;padding:.9rem;margin-bottom:.9rem}
+.sidebar-title{font-size:.78rem;font-weight:700;color:#999;margin-bottom:.65rem;letter-spacing:.05em}
+.tag-list{display:flex;flex-wrap:wrap;gap:5px}
+.tag-link{background:#f5f0e8;color:#666;padding:3px 9px;border-radius:12px;font-size:.75rem;cursor:pointer}
+.tag-link:hover{background:#ede8dc}
 
-/* ページネーション */
-.pagination {
-  display: flex;
-  justify-content: center;
-  gap: 0.5rem;
-  margin: 1.5rem 0;
-}
-.pagination a, .pagination span {
-  padding: 0.4rem 0.8rem;
-  border: 1px solid #e0d8c8;
-  border-radius: 6px;
-  font-size: 0.85rem;
-  color: #555;
-}
-.pagination a:hover { background: #f5f0e8; }
-.pagination .current { background: #f5c842; color: #333; border-color: #f5c842; font-weight: bold; }
+.pagination{display:flex;justify-content:center;gap:.5rem;margin:1.25rem 0}
+.pagination a,.pagination span{padding:.35rem .75rem;border:1px solid #e0d8c8;border-radius:6px;font-size:.82rem;color:#555}
+.pagination a:hover{background:#f5f0e8}
+.pagination .current{background:#f5c842;color:#333;border-color:#f5c842;font-weight:700}
 
-/* スレッド詳細 */
-.thread-detail {
-  background: #fff;
-  border: 1px solid #ede8dc;
-  border-radius: 8px;
-  padding: 1.5rem;
-  margin-bottom: 1rem;
-}
-.thread-detail h1 { font-size: 1.15rem; margin-bottom: 0.5rem; }
-.thread-detail .meta { font-size: 0.82rem; color: #aaa; margin-bottom: 1rem; }
-.thread-detail .body { font-size: 0.92rem; line-height: 1.7; color: #444; white-space: pre-wrap; }
-.thread-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 1rem; }
+.thread-detail{background:#fff;border:1px solid #ede8dc;border-radius:8px;padding:1.25rem;margin-bottom:.9rem}
+.thread-body{font-size:.92rem;line-height:1.75;color:#333;white-space:pre-wrap;margin-bottom:1rem}
+.thread-attrs{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:.75rem}
+.thread-tags{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:.75rem}
+.reactions-bar{display:flex;gap:.65rem;padding-top:.9rem;border-top:1px solid #f0ead8;flex-wrap:wrap}
+.reaction-btn{display:flex;align-items:center;gap:5px;background:#f5f0e8;border:1px solid #e0d8c8;border-radius:20px;padding:.35rem .9rem;font-size:.88rem;cursor:pointer;color:#555;transition:background .15s}
+.reaction-btn:hover{background:#ede8dc}
+.reaction-btn.active-like{background:#fff3cd;border-color:#f5c842;color:#856404}
+.reaction-btn.active-surprise{background:#fde8e8;border-color:#f5a0a0;color:#8b2c2c}
 
-/* リアクションボタン */
-.reactions-bar {
-  display: flex;
-  gap: 0.75rem;
-  margin-top: 1.25rem;
-  padding-top: 1rem;
-  border-top: 1px solid #f0ead8;
-  flex-wrap: wrap;
-}
-.reaction-btn {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-  background: #f5f0e8;
-  border: 1px solid #e0d8c8;
-  border-radius: 20px;
-  padding: 0.4rem 1rem;
-  font-size: 0.88rem;
-  cursor: pointer;
-  transition: background 0.15s;
-  color: #555;
-}
-.reaction-btn:hover { background: #ede8dc; }
-.reaction-btn.liked { background: #fff3cd; border-color: #f5c842; color: #856404; }
-.reaction-btn.surprised { background: #fde8e8; border-color: #f5a0a0; color: #8b2c2c; }
-.reaction-btn.count { font-weight: bold; }
+.breadcrumb{font-size:.78rem;color:#bbb;margin-bottom:.65rem}
+.breadcrumb a{color:#aaa}
 
-/* モーダル */
-.modal-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(0,0,0,0.45);
-  z-index: 200;
-  align-items: center;
-  justify-content: center;
-  padding: 1rem;
-}
-.modal-overlay.open { display: flex; }
-.modal {
-  background: #fff;
-  border-radius: 12px;
-  padding: 1.5rem;
-  width: 100%;
-  max-width: 520px;
-  max-height: 90vh;
-  overflow-y: auto;
-}
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 1.25rem;
-}
-.modal-header h2 { font-size: 1rem; }
-.modal-close { cursor: pointer; color: #aaa; font-size: 1.3rem; line-height: 1; background: none; border: none; }
-.form-group { margin-bottom: 0.9rem; }
-.form-group label { display: block; font-size: 0.8rem; color: #666; margin-bottom: 0.3rem; }
-.form-group input, .form-group textarea, .form-group select {
-  width: 100%;
-  padding: 0.5rem 0.75rem;
-  border: 1px solid #e0d8c8;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  background: #faf8f2;
-  font-family: inherit;
-}
-.form-group textarea { resize: vertical; }
-.tag-select { display: flex; flex-wrap: wrap; gap: 6px; }
-.tag-check { display: none; }
-.tag-check + label {
-  background: #f5f0e8;
-  color: #666;
-  padding: 3px 10px;
-  border-radius: 12px;
-  font-size: 0.78rem;
-  cursor: pointer;
-  border: 1px solid transparent;
-}
-.tag-check:checked + label { background: #fff3cd; color: #856404; border-color: #f5c842; }
-.btn-submit {
-  background: #f5c842;
-  color: #333;
-  border: none;
-  border-radius: 20px;
-  padding: 0.6rem 2rem;
-  font-size: 0.9rem;
-  cursor: pointer;
-  font-weight: bold;
-  width: 100%;
-  margin-top: 0.5rem;
-}
-.btn-submit:hover { background: #e8b800; }
+.modal-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:200;align-items:flex-start;justify-content:center;padding:1rem;overflow-y:auto}
+.modal-overlay.open{display:flex}
+.modal{background:#fff;border-radius:12px;padding:1.25rem;width:100%;max-width:560px;margin:auto}
+.modal-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem}
+.modal-header h2{font-size:.95rem}
+.modal-close{cursor:pointer;color:#aaa;font-size:1.2rem;background:none;border:none;line-height:1}
 
-/* パンくず */
-.breadcrumb { font-size: 0.82rem; color: #aaa; margin-bottom: 0.75rem; }
-.breadcrumb a { color: #888; }
-.breadcrumb a:hover { color: #333; }
+.form-grid{display:grid;grid-template-columns:1fr 1fr;gap:.6rem}
+.form-group{margin-bottom:.7rem}
+.form-group.full{grid-column:1/-1}
+.form-group label{display:block;font-size:.75rem;color:#777;margin-bottom:.25rem}
+.form-group input,.form-group textarea,.form-group select{width:100%;padding:.45rem .65rem;border:1px solid #e0d8c8;border-radius:6px;font-size:.88rem;background:#faf8f2;font-family:inherit}
+.form-group textarea{resize:vertical}
 
-@media (max-width: 640px) {
-  .sidebar { display: none; }
-  .header { flex-wrap: wrap; }
-  .logo { width: 120px; height: 40px; }
-}
+.tag-search-bar{display:flex;align-items:center;background:#f5f0e8;border:1px solid #e0d8c8;border-radius:8px;padding:.35rem .65rem;gap:.4rem;margin-bottom:.5rem}
+.tag-search-bar input{border:none;outline:none;background:transparent;font-size:.85rem;width:100%}
+.attached-tags{display:flex;flex-wrap:wrap;gap:5px;min-height:24px;margin-bottom:.5rem}
+.attached-tag{background:#f5c842;color:#333;padding:2px 8px;border-radius:10px;font-size:.75rem;cursor:pointer;display:flex;align-items:center;gap:3px}
+.attached-tag:hover{background:#e8b800}
+.tag-candidates{display:flex;flex-wrap:wrap;gap:5px;margin-bottom:.35rem}
+.tag-candidate{background:#f5f0e8;color:#666;padding:2px 9px;border-radius:10px;font-size:.75rem;cursor:pointer;border:1px solid #e0d8c8}
+.tag-candidate:hover{background:#fff3cd;border-color:#f5c842}
+.suggest-label{font-size:.72rem;color:#aaa;margin-bottom:.3rem}
+
+.btn-submit{background:#f5c842;color:#333;border:none;border-radius:20px;padding:.55rem 2rem;font-size:.88rem;cursor:pointer;font-weight:700;width:100%;margin-top:.4rem}
+.btn-submit:hover{background:#e8b800}
+
+/* 管理画面 */
+.admin-wrap{max-width:800px;margin:2rem auto;padding:1rem}
+.admin-wrap h1{font-size:1.2rem;margin-bottom:1.5rem;padding-bottom:.5rem;border-bottom:2px solid #f5c842}
+.admin-wrap h2{font-size:1rem;margin-bottom:1rem;color:#555}
+.admin-table{width:100%;border-collapse:collapse;margin-bottom:1.5rem;font-size:.88rem}
+.admin-table th{background:#f5f0e8;padding:.5rem .75rem;text-align:left;border:1px solid #e8e0d0}
+.admin-table td{padding:.5rem .75rem;border:1px solid #e8e0d0;vertical-align:middle}
+.btn-sm{padding:.25rem .75rem;border-radius:4px;font-size:.78rem;cursor:pointer;border:none}
+.btn-danger{background:#fee2e2;color:#b91c1c}
+.btn-danger:hover{background:#fecaca}
+.btn-primary{background:#f5c842;color:#333}
+.btn-primary:hover{background:#e8b800}
+.admin-form{display:flex;gap:.5rem;margin-bottom:1rem}
+.admin-form input{flex:1;padding:.4rem .65rem;border:1px solid #e0d8c8;border-radius:6px;font-size:.88rem}
+.admin-login{max-width:360px;margin:4rem auto;background:#fff;border:1px solid #ede8dc;border-radius:12px;padding:2rem}
+.admin-login h1{font-size:1rem;margin-bottom:1.25rem;text-align:center}
+.back-link{display:inline-block;margin-bottom:1rem;font-size:.82rem;color:#888}
+.back-link:hover{color:#333}
+
+@media(max-width:640px){.sidebar{display:none}.header{flex-wrap:wrap}.form-grid{grid-template-columns:1fr}}
 `;
 
 // =============================================
-// HTML部品
+// 投稿フォーム モーダル
 // =============================================
 
-function renderHeader() {
-  return `
-<header class="header">
-  <div class="logo"><!-- ロゴ画像 --></div>
-  <div class="search-wrap">
-    <span>🔍</span>
-    <input type="text" placeholder="投稿を検索">
-  </div>
-  <button class="btn-post" onclick="openModal()">＋ 投稿する</button>
-</header>`;
-}
-
-function renderSidebar(boards, tags, currentSlug = '') {
-  const boardLinks = boards.map(b => `
-    <a class="board-link${b.slug === currentSlug ? ' active' : ''}" href="/${escape(b.slug)}">${escape(b.name)}</a>
-  `).join('');
-
-  const tagLinks = tags.map(t => `
-    <span class="tag-link" onclick="filterByTag('${escape(t.name)}')">#${escape(t.name)}</span>
-  `).join('');
-
-  return `
-<aside class="sidebar">
-  <div class="sidebar-box">
-    <div class="sidebar-title">板一覧</div>
-    <a class="board-link${!currentSlug ? ' active' : ''}" href="/">すべて</a>
-    ${boardLinks}
-  </div>
-  <div class="sidebar-box">
-    <div class="sidebar-title">タグ</div>
-    <div class="tag-list">${tagLinks}</div>
-  </div>
-</aside>`;
-}
-
-function renderNewThreadModal(boards, tags, defaultSlug = '') {
-  const boardOptions = boards.map(b =>
-    `<option value="${escape(b.slug)}"${b.slug === defaultSlug ? ' selected' : ''}>${escape(b.name)}</option>`
+function renderPostModal(tags) {
+  const tagOptions = tags.map(t =>
+    `<option value="${t.id}">${esc(t.name)}</option>`
   ).join('');
-
-  const tagCheckboxes = tags.map(t => `
-    <input class="tag-check" type="checkbox" name="tags" id="tag-${escape(t.id)}" value="${escape(t.id)}">
-    <label for="tag-${escape(t.id)}">#${escape(t.name)}</label>
-  `).join('');
 
   return `
 <div class="modal-overlay" id="post-modal">
@@ -412,30 +221,90 @@ function renderNewThreadModal(boards, tags, defaultSlug = '') {
       <h2>投稿する</h2>
       <button class="modal-close" onclick="closeModal()">✕</button>
     </div>
-    <form id="post-form" method="POST">
-      <div class="form-group">
-        <label>板を選ぶ</label>
-        <select name="board" id="modal-board" onchange="updateFormAction(this.value)">
-          ${boardOptions}
-        </select>
-      </div>
-      <div class="form-group">
-        <label>タイトル（必須）</label>
-        <input name="title" required placeholder="例：イヤイヤ期の対応で困っています">
-      </div>
-      <div class="form-group">
-        <label>名前</label>
-        <input name="author_name" placeholder="名無しさん">
-      </div>
-      <div class="form-group">
+    <form id="post-form" method="POST" action="/new">
+      <div class="form-group full">
         <label>本文（必須）</label>
-        <textarea name="body" rows="5" required placeholder="具体的な状況や質問を書いてください"></textarea>
+        <textarea name="body" id="post-body" rows="5" required placeholder="相談・経験談などを自由に書いてください" oninput="onBodyInput(this.value)"></textarea>
       </div>
-      <div class="form-group">
-        <label>タグ（複数選択可）</label>
-        <div class="tag-select">${tagCheckboxes}</div>
+      <div class="form-grid">
+        <div class="form-group">
+          <label>場所</label>
+          <select name="place">
+            <option value="">選択しない</option>
+            <option>保育園</option>
+            <option>幼稚園</option>
+            <option>認定こども園</option>
+            <option>小学校</option>
+            <option>学童保育</option>
+            <option>放課後児童支援</option>
+            <option>家庭</option>
+            <option>その他</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>子どもの年齢</label>
+          <select name="child_age">
+            <option value="">選択しない</option>
+            <option>0歳</option>
+            <option>1歳</option>
+            <option>2歳</option>
+            <option>3歳</option>
+            <option>4歳</option>
+            <option>5歳</option>
+            <option>6歳以上</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>投稿者の年代</label>
+          <select name="poster_age">
+            <option value="">選択しない</option>
+            <option>10代</option>
+            <option>20代</option>
+            <option>30代</option>
+            <option>40代</option>
+            <option>50代以上</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label>性別</label>
+          <select name="poster_gender">
+            <option value="">選択しない</option>
+            <option>男性</option>
+            <option>女性</option>
+            <option>その他</option>
+          </select>
+        </div>
+        <div class="form-group full">
+          <label>立場</label>
+          <select name="poster_role">
+            <option value="">選択しない</option>
+            <option>保育士</option>
+            <option>幼稚園教諭</option>
+            <option>保育補助</option>
+            <option>学童支援員</option>
+            <option>保護者</option>
+            <option>学生</option>
+            <option>その他</option>
+          </select>
+        </div>
       </div>
-      <div class="form-group">
+
+      <div class="form-group full">
+        <label>タグ</label>
+        <div class="tag-search-bar">
+          <span>🏷</span>
+          <input type="text" id="tag-search" placeholder="タグを検索..." oninput="searchTags(this.value)">
+        </div>
+        <div class="attached-tags" id="attached-tags"></div>
+        <div id="suggest-area" style="display:none">
+          <div class="suggest-label">📌 おすすめタグ</div>
+          <div class="tag-candidates" id="suggest-tags"></div>
+        </div>
+        <div class="tag-candidates" id="tag-candidates"></div>
+        <input type="hidden" name="tag_ids" id="tag-ids-input">
+      </div>
+
+      <div class="form-group full">
         <label>削除パスワード（任意）</label>
         <input name="delete_password" type="password" placeholder="後で削除したいときに使います">
       </div>
@@ -445,19 +314,41 @@ function renderNewThreadModal(boards, tags, defaultSlug = '') {
 </div>`;
 }
 
-function renderCard(t, slug) {
-  const tagsHtml = t.tag_names
-    ? t.tag_names.split(',').map(tag => `<span class="tag-chip">#${escape(tag)}</span>`).join('')
-    : '';
+// =============================================
+// サイドバー
+// =============================================
 
+function renderSidebar(tags) {
+  const tagLinks = tags.map(t =>
+    `<span class="tag-link" onclick="location.href='/?tag=${encodeURIComponent(t.name)}'">#${esc(t.name)}</span>`
+  ).join('');
   return `
-<div class="card" onclick="location.href='/${escape(slug || t.board_slug)}/${t.id}'">
-  <div class="card-title">${escape(t.title)}</div>
-  <div class="card-body">${escape(t.body)}</div>
-  ${tagsHtml ? `<div class="card-tags">${tagsHtml}</div>` : ''}
+<aside class="sidebar">
+  <div class="sidebar-box">
+    <div class="sidebar-title">タグ一覧</div>
+    <div class="tag-list">${tagLinks}</div>
+  </div>
+</aside>`;
+}
+
+// =============================================
+// カード
+// =============================================
+
+function renderCard(t) {
+  const attrs = [t.place, t.child_age, t.poster_age, t.poster_gender, t.poster_role]
+    .filter(Boolean)
+    .map(a => `<span class="attr-chip">${esc(a)}</span>`)
+    .join('');
+  const tagChips = t.tag_names
+    ? t.tag_names.split(',').map(n => `<span class="tag-chip">#${esc(n)}</span>`).join('')
+    : '';
+  return `
+<div class="card" onclick="location.href='/${t.id}'">
+  <div class="card-body">${esc(t.body)}</div>
+  ${attrs ? `<div class="card-attrs">${attrs}</div>` : ''}
+  ${tagChips ? `<div class="card-tags">${tagChips}</div>` : ''}
   <div class="card-meta">
-    ${t.board_name ? `<span class="card-board">${escape(t.board_name)}</span>` : ''}
-    <span>${escape(t.author_name)}</span>
     <span>${timeAgo(t.created_at)}</span>
     <div class="card-reactions">
       <span class="reaction">😊 ${t.likes || 0}</span>
@@ -467,68 +358,105 @@ function renderCard(t, slug) {
 </div>`;
 }
 
-function buildPagination(page, hasNext, base) {
+// =============================================
+// ページネーション
+// =============================================
+
+function pagination(page, hasNext, base) {
+  const sep = base.includes('?') ? '&' : '?';
   const parts = [];
-  if (page > 1) parts.push(`<a href="${base}${base.includes('?') ? '&' : '?'}page=${page - 1}">← 前へ</a>`);
+  if (page > 1) parts.push(`<a href="${base}${sep}page=${page - 1}">← 前へ</a>`);
   parts.push(`<span class="current">${page}</span>`);
-  if (hasNext) parts.push(`<a href="${base}${base.includes('?') ? '&' : '?'}page=${page + 1}">次へ →</a>`);
+  if (hasNext) parts.push(`<a href="${base}${sep}page=${page + 1}">次へ →</a>`);
   return parts.length > 1 ? `<div class="pagination">${parts.join('')}</div>` : '';
 }
 
-const JS = `
-function openModal() {
-  document.getElementById('post-modal').classList.add('open');
-}
-function closeModal() {
-  document.getElementById('post-modal').classList.remove('open');
-}
-function updateFormAction(slug) {
-  document.getElementById('post-form').action = '/' + slug + '/new';
-}
-function filterByTag(tag) {
-  location.href = '/?tag=' + encodeURIComponent(tag);
-}
-document.getElementById('post-modal')?.addEventListener('click', function(e) {
-  if (e.target === this) closeModal();
-});
+// =============================================
+// JavaScript（クライアント側）
+// =============================================
 
-// リアクションボタン
-async function sendReaction(threadId, type) {
-  const btn = document.querySelector('[data-reaction="' + type + '"]');
-  const res = await fetch('/api/like', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ thread_id: threadId, type })
+function clientJS(allTags) {
+  return `
+<script>
+const ALL_TAGS = ${JSON.stringify(allTags)};
+let attachedIds = new Set();
+
+function openModal(){ document.getElementById('post-modal').classList.add('open'); }
+function closeModal(){ document.getElementById('post-modal').classList.remove('open'); }
+document.getElementById('post-modal')?.addEventListener('click', e => { if(e.target.id==='post-modal') closeModal(); });
+
+function renderAttached(){
+  const el = document.getElementById('attached-tags');
+  el.innerHTML = [...attachedIds].map(id => {
+    const t = ALL_TAGS.find(x=>x.id===id);
+    return t ? \`<span class="attached-tag" onclick="removeTag(\${id})">#\${t.name} ✕</span>\` : '';
+  }).join('');
+  document.getElementById('tag-ids-input').value = [...attachedIds].join(',');
+}
+
+function addTag(id){
+  attachedIds.add(id);
+  renderAttached();
+  searchTags(document.getElementById('tag-search').value);
+}
+
+function removeTag(id){
+  attachedIds.delete(id);
+  renderAttached();
+  searchTags(document.getElementById('tag-search').value);
+}
+
+function searchTags(q){
+  const filtered = ALL_TAGS.filter(t => !attachedIds.has(t.id) && (q===''||t.name.includes(q)));
+  const el = document.getElementById('tag-candidates');
+  el.innerHTML = filtered.slice(0,20).map(t =>
+    \`<span class="tag-candidate" onclick="addTag(\${t.id})">#\${t.name}</span>\`
+  ).join('');
+}
+
+searchTags('');
+
+let suggestTimer;
+async function onBodyInput(text){
+  clearTimeout(suggestTimer);
+  suggestTimer = setTimeout(async ()=>{
+    if(text.length < 5){ document.getElementById('suggest-area').style.display='none'; return; }
+    const res = await fetch('/api/suggest-tags', {
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({body: text})
+    });
+    const data = await res.json();
+    const area = document.getElementById('suggest-area');
+    const el = document.getElementById('suggest-tags');
+    const hits = data.tags.filter(t => !attachedIds.has(t.id));
+    if(hits.length===0){ area.style.display='none'; return; }
+    el.innerHTML = hits.map(t =>
+      \`<span class="tag-candidate" onclick="addTag(\${t.id})">#\${t.name}</span>\`
+    ).join('');
+    area.style.display='block';
+  }, 500);
+}
+
+async function sendReaction(threadId, type){
+  const res = await fetch('/api/like',{
+    method:'POST',
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({thread_id: threadId, type})
   });
   const data = await res.json();
-  if (data.ok) {
-    const countEl = document.querySelector('[data-count="' + type + '"]');
-    if (countEl) countEl.textContent = data.count;
-    btn.classList.toggle('liked', type === 'like' && data.action === 'added');
-    btn.classList.toggle('surprised', type === 'surprise' && data.action === 'added');
+  if(data.ok){
+    document.querySelector('[data-count="'+type+'"]').textContent = data.count;
+    const btn = document.querySelector('[data-reaction="'+type+'"]');
+    if(type==='like') btn.classList.toggle('active-like', data.action==='added');
+    if(type==='surprise') btn.classList.toggle('active-surprise', data.action==='added');
   }
 }
-`;
-
-function layout(title, body, extraJs = '') {
-  return new Response(`<!DOCTYPE html>
-<html lang="ja">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>${escape(title)} | 保育士・子育て掲示板</title>
-<style>${CSS}</style>
-</head>
-<body>
-${renderHeader()}
-${body}
-<script>${JS}${extraJs}</script>
-</body>
-</html>`, { headers: { 'Content-Type': 'text/html; charset=UTF-8' } });
+</script>`;
 }
 
 // =============================================
-// ページハンドラー
+// トップページ
 // =============================================
 
 async function handleTop(env, url) {
@@ -536,165 +464,174 @@ async function handleTop(env, url) {
   const sort = url.searchParams.get('sort') || 'new';
   const tag = url.searchParams.get('tag') || '';
   const offset = (page - 1) * PAGE_SIZE;
+  const orderBy = sort === 'popular' ? 't.likes DESC' : 't.created_at DESC';
 
-  const [{ results: boards }, { results: tags }] = await Promise.all([
-    env.DB.prepare('SELECT * FROM boards ORDER BY id').all(),
-    env.DB.prepare('SELECT * FROM tags ORDER BY name').all(),
-  ]);
+  const { results: tags } = await env.DB.prepare('SELECT * FROM tags ORDER BY name').all();
 
-  let query, binds;
-  const orderBy = sort === 'popular' ? 't.likes DESC' : 't.last_replied_at DESC';
-
+  let threads;
   if (tag) {
-    query = `
-      SELECT t.*, b.name as board_name, b.slug as board_slug,
-        GROUP_CONCAT(tg.name) as tag_names
+    const { results } = await env.DB.prepare(`
+      SELECT t.*, GROUP_CONCAT(tg.name) as tag_names
       FROM threads t
-      JOIN boards b ON t.board_id = b.id
-      JOIN thread_tags tt ON tt.thread_id = t.id
-      JOIN tags tg2 ON tg2.id = tt.tag_id
-      LEFT JOIN thread_tags tt2 ON tt2.thread_id = t.id
-      LEFT JOIN tags tg ON tg.id = tt2.tag_id
-      WHERE tg2.name = ?
-      GROUP BY t.id
-      ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
-    binds = [tag, PAGE_SIZE + 1, offset];
-  } else {
-    query = `
-      SELECT t.*, b.name as board_name, b.slug as board_slug,
-        GROUP_CONCAT(tg.name) as tag_names
-      FROM threads t
-      JOIN boards b ON t.board_id = b.id
+      JOIN thread_tags tt2 ON tt2.thread_id = t.id
+      JOIN tags tg2 ON tg2.id = tt2.tag_id AND tg2.name = ?
       LEFT JOIN thread_tags tt ON tt.thread_id = t.id
       LEFT JOIN tags tg ON tg.id = tt.tag_id
-      GROUP BY t.id
-      ORDER BY ${orderBy} LIMIT ? OFFSET ?`;
-    binds = [PAGE_SIZE + 1, offset];
+      GROUP BY t.id ORDER BY ${orderBy} LIMIT ? OFFSET ?
+    `).bind(tag, PAGE_SIZE + 1, offset).all();
+    threads = results;
+  } else {
+    const { results } = await env.DB.prepare(`
+      SELECT t.*, GROUP_CONCAT(tg.name) as tag_names
+      FROM threads t
+      LEFT JOIN thread_tags tt ON tt.thread_id = t.id
+      LEFT JOIN tags tg ON tg.id = tt.tag_id
+      GROUP BY t.id ORDER BY ${orderBy} LIMIT ? OFFSET ?
+    `).bind(PAGE_SIZE + 1, offset).all();
+    threads = results;
   }
 
-  const { results: threads } = await env.DB.prepare(query).bind(...binds).all();
   const hasNext = threads.length > PAGE_SIZE;
   const items = threads.slice(0, PAGE_SIZE);
-
   const baseUrl = tag ? `/?tag=${encodeURIComponent(tag)}&sort=${sort}` : `/?sort=${sort}`;
-  const cards = items.map(t => renderCard(t, t.board_slug)).join('') ||
-    '<p style="color:#aaa;text-align:center;padding:2rem">まだ投稿がありません</p>';
+
+  const cards = items.map(renderCard).join('') ||
+    '<p style="color:#bbb;text-align:center;padding:2rem">まだ投稿がありません</p>';
 
   const body = `
+<header class="header">
+  <div class="logo"><!-- ロゴ画像 --></div>
+  <div class="search-wrap">
+    <span>🔍</span>
+    <input type="text" placeholder="投稿を検索" id="search-input">
+  </div>
+  <button class="btn-post" onclick="openModal()">＋ 投稿する</button>
+</header>
 <div class="container">
   <main class="main">
-    ${tag ? `<p style="margin-bottom:0.75rem;font-size:0.85rem">🏷 #${escape(tag)} の投稿 <a href="/" style="color:#aaa;margin-left:0.5rem">✕ 解除</a></p>` : ''}
+    ${tag ? `<p style="margin-bottom:.65rem;font-size:.82rem;color:#888">#${esc(tag)} の投稿 <a href="/" style="color:#bbb;margin-left:.4rem">✕ 解除</a></p>` : ''}
     <div class="tabs">
       <a class="tab${sort !== 'popular' ? ' active' : ''}" href="/?sort=new${tag ? '&tag=' + encodeURIComponent(tag) : ''}">新着</a>
       <a class="tab${sort === 'popular' ? ' active' : ''}" href="/?sort=popular${tag ? '&tag=' + encodeURIComponent(tag) : ''}">人気</a>
     </div>
     ${cards}
-    ${buildPagination(page, hasNext, baseUrl)}
+    ${pagination(page, hasNext, baseUrl)}
   </main>
-  ${renderSidebar(boards, tags, '')}
+  ${renderSidebar(tags)}
 </div>
-${renderNewThreadModal(boards, tags, boards[0]?.slug || '')}`;
+${renderPostModal(tags)}
+${clientJS(tags)}`;
 
-  return layout('掲示板トップ', body, `updateFormAction('${escape(boards[0]?.slug || '')}');`);
+  return html('保育士・子育て掲示板', body);
 }
 
-async function handleBoard(env, url, slug) {
-  const page = parseInt(url.searchParams.get('page') || '1');
-  const sort = url.searchParams.get('sort') || 'new';
-  const offset = (page - 1) * PAGE_SIZE;
+// =============================================
+// スレッド詳細
+// =============================================
 
-  const [{ results: boards }, { results: tags }] = await Promise.all([
-    env.DB.prepare('SELECT * FROM boards ORDER BY id').all(),
-    env.DB.prepare('SELECT * FROM tags ORDER BY name').all(),
-  ]);
-
-  const board = boards.find(b => b.slug === slug);
-  if (!board) return new Response('Not Found', { status: 404 });
-
-  const orderBy = sort === 'popular' ? 't.likes DESC' : 't.last_replied_at DESC';
-  const { results: threads } = await env.DB.prepare(`
-    SELECT t.*, GROUP_CONCAT(tg.name) as tag_names
-    FROM threads t
-    LEFT JOIN thread_tags tt ON tt.thread_id = t.id
-    LEFT JOIN tags tg ON tg.id = tt.tag_id
-    WHERE t.board_id = ?
-    GROUP BY t.id
-    ORDER BY ${orderBy} LIMIT ? OFFSET ?
-  `).bind(board.id, PAGE_SIZE + 1, offset).all();
-
-  const hasNext = threads.length > PAGE_SIZE;
-  const items = threads.slice(0, PAGE_SIZE);
-  const baseUrl = `/${slug}?sort=${sort}`;
-
-  const cards = items.map(t => renderCard(t, slug)).join('') ||
-    '<p style="color:#aaa;text-align:center;padding:2rem">まだ投稿がありません</p>';
-
-  const body = `
-<div class="container">
-  <main class="main">
-    <div class="breadcrumb"><a href="/">トップ</a> &gt; ${escape(board.name)}</div>
-    <div class="tabs">
-      <a class="tab${sort !== 'popular' ? ' active' : ''}" href="/${slug}?sort=new">新着</a>
-      <a class="tab${sort === 'popular' ? ' active' : ''}" href="/${slug}?sort=popular">人気</a>
-    </div>
-    ${cards}
-    ${buildPagination(page, hasNext, baseUrl)}
-  </main>
-  ${renderSidebar(boards, tags, slug)}
-</div>
-${renderNewThreadModal(boards, tags, slug)}`;
-
-  return layout(board.name, body, `updateFormAction('${escape(slug)}');`);
-}
-
-async function handleThread(env, slug, threadId) {
-  const [{ results: boards }, { results: tags }] = await Promise.all([
-    env.DB.prepare('SELECT * FROM boards ORDER BY id').all(),
-    env.DB.prepare('SELECT * FROM tags ORDER BY name').all(),
-  ]);
-
-  const board = boards.find(b => b.slug === slug);
-  if (!board) return new Response('Not Found', { status: 404 });
-
-  const thread = await env.DB.prepare(
-    'SELECT * FROM threads WHERE id = ? AND board_id = ?'
-  ).bind(threadId, board.id).first();
+async function handleThread(env, url, threadId) {
+  const { results: tags } = await env.DB.prepare('SELECT * FROM tags ORDER BY name').all();
+  const thread = await env.DB.prepare('SELECT * FROM threads WHERE id = ?').bind(threadId).first();
   if (!thread) return new Response('Not Found', { status: 404 });
 
   const { results: threadTags } = await env.DB.prepare(`
-    SELECT tg.name FROM thread_tags tt
-    JOIN tags tg ON tg.id = tt.tag_id
-    WHERE tt.thread_id = ?
+    SELECT tg.name FROM thread_tags tt JOIN tags tg ON tg.id = tt.tag_id WHERE tt.thread_id = ?
   `).bind(threadId).all();
 
-  const tagsHtml = threadTags.map(t => `<span class="tag-chip">#${escape(t.name)}</span>`).join('');
+  const attrs = [thread.place, thread.child_age, thread.poster_age, thread.poster_gender, thread.poster_role]
+    .filter(Boolean).map(a => `<span class="attr-chip">${esc(a)}</span>`).join('');
+  const tagChips = threadTags.map(t => `<span class="tag-chip" style="cursor:pointer" onclick="location.href='/?tag=${encodeURIComponent(t.name)}'">#${esc(t.name)}</span>`).join('');
 
   const body = `
+<header class="header">
+  <div class="logo"><!-- ロゴ画像 --></div>
+  <div class="search-wrap">
+    <span>🔍</span>
+    <input type="text" placeholder="投稿を検索">
+  </div>
+  <button class="btn-post" onclick="openModal()">＋ 投稿する</button>
+</header>
 <div class="container">
   <main class="main">
-    <div class="breadcrumb">
-      <a href="/">トップ</a> &gt; <a href="/${escape(slug)}">${escape(board.name)}</a> &gt; ${escape(thread.title)}
-    </div>
+    <div class="breadcrumb"><a href="/">← 一覧に戻る</a></div>
     <div class="thread-detail">
-      <h1>${escape(thread.title)}</h1>
-      <div class="meta">${escape(thread.author_name)} ・ ${timeAgo(thread.created_at)}</div>
-      <div class="body">${escape(thread.body)}</div>
-      ${tagsHtml ? `<div class="thread-tags">${tagsHtml}</div>` : ''}
+      <div class="thread-body">${esc(thread.body)}</div>
+      ${attrs ? `<div class="thread-attrs">${attrs}</div>` : ''}
+      ${tagChips ? `<div class="thread-tags">${tagChips}</div>` : ''}
+      <div style="font-size:.75rem;color:#bbb;margin-bottom:.5rem">${timeAgo(thread.created_at)}</div>
       <div class="reactions-bar">
-        <button class="reaction-btn" data-reaction="like" onclick="sendReaction(${thread.id}, 'like')">
+        <button class="reaction-btn" data-reaction="like" onclick="sendReaction(${thread.id},'like')">
           😊 <span data-count="like">${thread.likes || 0}</span>
         </button>
-        <button class="reaction-btn" data-reaction="surprise" onclick="sendReaction(${thread.id}, 'surprise')">
+        <button class="reaction-btn" data-reaction="surprise" onclick="sendReaction(${thread.id},'surprise')">
           😲 <span data-count="surprise">${thread.surprises || 0}</span>
         </button>
       </div>
     </div>
   </main>
-  ${renderSidebar(boards, tags, slug)}
+  ${renderSidebar(tags)}
 </div>
-${renderNewThreadModal(boards, tags, slug)}`;
+${renderPostModal(tags)}
+${clientJS(tags)}`;
 
-  return layout(thread.title, body, `updateFormAction('${escape(slug)}');`);
+  return html(thread.body.slice(0, 30) + '...', body);
+}
+
+// =============================================
+// 投稿作成
+// =============================================
+
+async function handleNewThread(request, env) {
+  const form = await request.formData();
+  const body = (form.get('body') ?? '').trim();
+  const place = (form.get('place') ?? '').trim() || null;
+  const child_age = (form.get('child_age') ?? '').trim() || null;
+  const poster_age = (form.get('poster_age') ?? '').trim() || null;
+  const poster_gender = (form.get('poster_gender') ?? '').trim() || null;
+  const poster_role = (form.get('poster_role') ?? '').trim() || null;
+  const delete_password = (form.get('delete_password') ?? '').trim() || null;
+  const tagIds = (form.get('tag_ids') ?? '').split(',').map(Number).filter(Boolean);
+  const ip = request.headers.get('CF-Connecting-IP') ?? '';
+
+  if (!body) return new Response('本文は必須です', { status: 400 });
+
+  const result = await env.DB.prepare(
+    'INSERT INTO threads (body,place,child_age,poster_age,poster_gender,poster_role,ip_address,delete_password) VALUES (?,?,?,?,?,?,?,?)'
+  ).bind(body, place, child_age, poster_age, poster_gender, poster_role, ip, delete_password).run();
+
+  const threadId = result.meta.last_row_id;
+  for (const tagId of tagIds) {
+    await env.DB.prepare('INSERT OR IGNORE INTO thread_tags (thread_id,tag_id) VALUES (?,?)').bind(threadId, tagId).run();
+  }
+
+  return Response.redirect(`/${threadId}`, 303);
+}
+
+// =============================================
+// API: タグ推薦
+// =============================================
+
+async function handleSuggestTags(request, env) {
+  let body;
+  try { body = await request.json(); } catch { return Response.json({ tags: [] }); }
+  const text = (body.body ?? '').toLowerCase();
+  if (!text) return Response.json({ tags: [] });
+
+  const { results: keywords } = await env.DB.prepare(`
+    SELECT tk.keyword, tk.tag_id, tg.name
+    FROM tag_keywords tk JOIN tags tg ON tg.id = tk.tag_id
+  `).all();
+
+  const matched = new Map();
+  for (const kw of keywords) {
+    if (text.includes(kw.keyword.toLowerCase())) {
+      if (!matched.has(kw.tag_id)) {
+        matched.set(kw.tag_id, { id: kw.tag_id, name: kw.name });
+      }
+    }
+  }
+
+  return Response.json({ tags: [...matched.values()] });
 }
 
 // =============================================
@@ -704,81 +641,184 @@ ${renderNewThreadModal(boards, tags, slug)}`;
 async function handleLike(request, env) {
   const ip = request.headers.get('CF-Connecting-IP') ?? 'unknown';
   let body;
-  try { body = await request.json(); } catch { return jsonError('invalid json'); }
+  try { body = await request.json(); } catch { return Response.json({ ok: false }, { status: 400 }); }
 
   const { thread_id, type } = body;
   if (!thread_id || !['like', 'surprise'].includes(type)) {
-    return jsonError('invalid params');
+    return Response.json({ ok: false }, { status: 400 });
   }
 
   const column = type === 'like' ? 'likes' : 'surprises';
-  const likeType = type;
-
-  // 同一IPの重複チェック
   const existing = await env.DB.prepare(
-    'SELECT id FROM likes WHERE thread_id = ? AND ip_address = ? AND type = ?'
-  ).bind(thread_id, ip, likeType).first();
+    'SELECT id FROM likes WHERE thread_id=? AND ip_address=? AND type=?'
+  ).bind(thread_id, ip, type).first();
 
-  let action, count;
+  let action;
   if (existing) {
-    // 取り消し
-    await env.DB.prepare('DELETE FROM likes WHERE id = ?').bind(existing.id).run();
-    await env.DB.prepare(`UPDATE threads SET ${column} = MAX(0, ${column} - 1) WHERE id = ?`).bind(thread_id).run();
+    await env.DB.prepare('DELETE FROM likes WHERE id=?').bind(existing.id).run();
+    await env.DB.prepare(`UPDATE threads SET ${column}=MAX(0,${column}-1) WHERE id=?`).bind(thread_id).run();
     action = 'removed';
   } else {
-    // 追加
-    await env.DB.prepare(
-      'INSERT INTO likes (thread_id, ip_address, type) VALUES (?, ?, ?)'
-    ).bind(thread_id, ip, likeType).run();
-    await env.DB.prepare(`UPDATE threads SET ${column} = ${column} + 1 WHERE id = ?`).bind(thread_id).run();
+    await env.DB.prepare('INSERT INTO likes (thread_id,ip_address,type) VALUES (?,?,?)').bind(thread_id, ip, type).run();
+    await env.DB.prepare(`UPDATE threads SET ${column}=${column}+1 WHERE id=?`).bind(thread_id).run();
     action = 'added';
   }
 
-  const thread = await env.DB.prepare(`SELECT ${column} FROM threads WHERE id = ?`).bind(thread_id).first();
-  count = thread?.[column] ?? 0;
-
-  return new Response(JSON.stringify({ ok: true, action, count }), {
-    headers: { 'Content-Type': 'application/json' }
-  });
-}
-
-function jsonError(msg) {
-  return new Response(JSON.stringify({ ok: false, error: msg }), {
-    status: 400,
-    headers: { 'Content-Type': 'application/json' }
-  });
+  const thread = await env.DB.prepare(`SELECT ${column} FROM threads WHERE id=?`).bind(thread_id).first();
+  return Response.json({ ok: true, action, count: thread?.[column] ?? 0 });
 }
 
 // =============================================
-// 投稿作成
+// 管理者画面
 // =============================================
 
-async function handleNewThread(request, env, slug) {
-  const board = await env.DB.prepare('SELECT * FROM boards WHERE slug = ?').bind(slug).first();
-  if (!board) return new Response('Not Found', { status: 404 });
+function adminLayout(title, body) {
+  return html(title, `<div class="admin-wrap">${body}</div>`);
+}
 
+async function requireAdmin(request, env) {
+  const session = await getAdminSession(request, env);
+  if (!session) return Response.redirect('/admin', 302);
+  return null;
+}
+
+async function adminLogin(request, env) {
+  const session = await getAdminSession(request, env);
+  if (session) return Response.redirect('/admin/tags', 302);
+  return adminLayout('管理者ログイン', `
+    <div class="admin-login">
+      <h1>🔐 管理者ログイン</h1>
+      <form method="POST" action="/admin/login">
+        <div class="form-group"><label>パスワード</label><input type="password" name="password" required autofocus></div>
+        <button class="btn-submit" type="submit">ログイン</button>
+      </form>
+    </div>`);
+}
+
+async function adminDoLogin(request, env) {
   const form = await request.formData();
-  const title = (form.get('title') ?? '').trim();
-  const body = (form.get('body') ?? '').trim();
-  const author_name = (form.get('author_name') ?? '').trim() || '名無しさん';
-  const delete_password = (form.get('delete_password') ?? '').trim() || null;
-  const ip = request.headers.get('CF-Connecting-IP') ?? '';
-  const tagIds = form.getAll('tags').map(Number).filter(Boolean);
+  const pw = form.get('password') ?? '';
+  if (pw !== ADMIN_PASSWORD) return adminLayout('ログイン失敗', '<p>パスワードが違います。<a href="/admin">戻る</a></p>');
 
-  if (!title || !body) return new Response('タイトルと本文は必須です', { status: 400 });
+  const sessionId = crypto.randomUUID();
+  await env.DB.prepare('INSERT INTO admin_sessions (id) VALUES (?)').bind(sessionId).run();
 
-  const result = await env.DB.prepare(
-    'INSERT INTO threads (board_id, title, author_name, body, ip_address, delete_password, likes, surprises) VALUES (?, ?, ?, ?, ?, ?, 0, 0)'
-  ).bind(board.id, title, author_name, body, ip, delete_password).run();
+  return new Response('', {
+    status: 302,
+    headers: { Location: '/admin/tags', 'Set-Cookie': setCookie('admin_session', sessionId) }
+  });
+}
 
-  const threadId = result.meta.last_row_id;
+async function adminLogout(request, env) {
+  const cookie = request.headers.get('Cookie') || '';
+  const match = cookie.match(/admin_session=([^;]+)/);
+  if (match) await env.DB.prepare('DELETE FROM admin_sessions WHERE id=?').bind(match[1]).run();
+  return new Response('', { status: 302, headers: { Location: '/admin', 'Set-Cookie': setCookie('admin_session', '', 0) } });
+}
 
-  // タグ紐付け
-  for (const tagId of tagIds) {
-    await env.DB.prepare(
-      'INSERT OR IGNORE INTO thread_tags (thread_id, tag_id) VALUES (?, ?)'
-    ).bind(threadId, tagId).run();
-  }
+async function adminTags(request, env) {
+  const redirect = await requireAdmin(request, env);
+  if (redirect) return redirect;
 
-  return Response.redirect(`/${slug}/${threadId}`, 303);
+  const { results: tags } = await env.DB.prepare(`
+    SELECT t.*, COUNT(tk.id) as kw_count FROM tags t
+    LEFT JOIN tag_keywords tk ON tk.tag_id = t.id
+    GROUP BY t.id ORDER BY t.name
+  `).all();
+
+  const rows = tags.map(t => `
+    <tr>
+      <td>${esc(t.name)}</td>
+      <td>${t.kw_count}個</td>
+      <td>
+        <a href="/admin/tags/${t.id}/keywords" class="btn-sm btn-primary" style="text-decoration:none;padding:.25rem .75rem;border-radius:4px;display:inline-block">キーワード管理</a>
+      </td>
+      <td>
+        <form method="POST" action="/admin/tags/${t.id}/delete" style="display:inline" onsubmit="return confirm('削除しますか？')">
+          <button class="btn-sm btn-danger" type="submit">削除</button>
+        </form>
+      </td>
+    </tr>`).join('');
+
+  return adminLayout('タグ管理', `
+    <h1>タグ管理</h1>
+    <a class="back-link" href="/admin/logout">ログアウト</a>
+    <h2>新しいタグを追加</h2>
+    <form class="admin-form" method="POST" action="/admin/tags">
+      <input name="name" placeholder="タグ名（例: 排泄）" required>
+      <button class="btn-sm btn-primary" type="submit">追加</button>
+    </form>
+    <table class="admin-table">
+      <thead><tr><th>タグ名</th><th>キーワード数</th><th>キーワード</th><th>削除</th></tr></thead>
+      <tbody>${rows}</tbody>
+    </table>`);
+}
+
+async function adminAddTag(request, env) {
+  const redirect = await requireAdmin(request, env);
+  if (redirect) return redirect;
+  const form = await request.formData();
+  const name = (form.get('name') ?? '').trim();
+  if (name) await env.DB.prepare('INSERT OR IGNORE INTO tags (name) VALUES (?)').bind(name).run();
+  return Response.redirect('/admin/tags', 302);
+}
+
+async function adminDeleteTag(request, env, tagId) {
+  const redirect = await requireAdmin(request, env);
+  if (redirect) return redirect;
+  await env.DB.prepare('DELETE FROM tags WHERE id=?').bind(tagId).run();
+  return Response.redirect('/admin/tags', 302);
+}
+
+async function adminKeywords(request, env, tagId) {
+  const redirect = await requireAdmin(request, env);
+  if (redirect) return redirect;
+
+  const tag = await env.DB.prepare('SELECT * FROM tags WHERE id=?').bind(tagId).first();
+  if (!tag) return new Response('Not Found', { status: 404 });
+
+  const { results: keywords } = await env.DB.prepare(
+    'SELECT * FROM tag_keywords WHERE tag_id=? ORDER BY keyword'
+  ).bind(tagId).all();
+
+  const rows = keywords.map(k => `
+    <tr>
+      <td>${esc(k.keyword)}</td>
+      <td>
+        <form method="POST" action="/admin/keywords/${k.id}/delete" style="display:inline">
+          <button class="btn-sm btn-danger" type="submit">削除</button>
+        </form>
+      </td>
+    </tr>`).join('');
+
+  return adminLayout(`#${tag.name} のキーワード管理`, `
+    <h1>#${esc(tag.name)} のキーワード管理</h1>
+    <a class="back-link" href="/admin/tags">← タグ一覧に戻る</a>
+    <h2>キーワードを追加</h2>
+    <p style="font-size:.82rem;color:#888;margin-bottom:.75rem">このキーワードが本文に含まれると #${esc(tag.name)} がおすすめタグとして表示されます</p>
+    <form class="admin-form" method="POST" action="/admin/tags/${tagId}/keywords">
+      <input name="keyword" placeholder="例: トイレ" required>
+      <button class="btn-sm btn-primary" type="submit">追加</button>
+    </form>
+    <table class="admin-table">
+      <thead><tr><th>キーワード</th><th>削除</th></tr></thead>
+      <tbody>${rows || '<tr><td colspan="2" style="color:#bbb;text-align:center">まだキーワードがありません</td></tr>'}</tbody>
+    </table>`);
+}
+
+async function adminAddKeyword(request, env, tagId) {
+  const redirect = await requireAdmin(request, env);
+  if (redirect) return redirect;
+  const form = await request.formData();
+  const keyword = (form.get('keyword') ?? '').trim();
+  if (keyword) await env.DB.prepare('INSERT OR IGNORE INTO tag_keywords (tag_id,keyword) VALUES (?,?)').bind(tagId, keyword).run();
+  return Response.redirect(`/admin/tags/${tagId}/keywords`, 302);
+}
+
+async function adminDeleteKeyword(request, env, keywordId) {
+  const redirect = await requireAdmin(request, env);
+  if (redirect) return redirect;
+  const kw = await env.DB.prepare('SELECT tag_id FROM tag_keywords WHERE id=?').bind(keywordId).first();
+  await env.DB.prepare('DELETE FROM tag_keywords WHERE id=?').bind(keywordId).run();
+  return Response.redirect(`/admin/tags/${kw?.tag_id}/keywords`, 302);
 }
