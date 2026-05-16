@@ -337,23 +337,21 @@ function renderSidebar(tags) {
 // =============================================
 
 function renderCard(t) {
-  const attrs = [t.place, t.child_age, t.poster_age, t.poster_gender, t.poster_role]
-    .filter(Boolean)
-    .map(a => `<span class="attr-chip">${esc(a)}</span>`)
-    .join('');
   const tagChips = t.tag_names
     ? t.tag_names.split(',').map(n => `<span class="tag-chip">#${esc(n)}</span>`).join('')
     : '';
+  const attrList = [t.place, t.child_age, t.poster_age, t.poster_gender, t.poster_role]
+    .filter(Boolean).join(' ');
   return `
 <div class="card" onclick="location.href='/${t.id}'">
   <div class="card-body">${esc(t.body)}</div>
-  ${attrs ? `<div class="card-attrs">${attrs}</div>` : ''}
   ${tagChips ? `<div class="card-tags">${tagChips}</div>` : ''}
   <div class="card-meta">
     <span>${timeAgo(t.created_at)}</span>
     <div class="card-reactions">
       <span class="reaction">😊 ${t.likes || 0}</span>
       <span class="reaction">😲 ${t.surprises || 0}</span>
+      ${attrList ? `<span class="reaction" style="color:#bbb;margin-left:.25rem">${esc(attrList)}</span>` : ''}
     </div>
   </div>
 </div>`;
@@ -419,6 +417,8 @@ searchTags('');
 
 let suggestTimer;
 async function onBodyInput(text){
+  const cc = document.getElementById('char-count');
+  if(cc) cc.textContent = text.length + '/250字';
   clearTimeout(suggestTimer);
   suggestTimer = setTimeout(async ()=>{
     if(text.length < 5){ document.getElementById('suggest-area').style.display='none'; return; }
@@ -604,7 +604,10 @@ async function handlePostPage(env, url) {
   <form method="POST" action="/new" style="background:#fff;border:1px solid #ede8dc;border-radius:10px;padding:1.5rem">
     <div class="form-group full">
       <label>本文（必須）</label>
-      <textarea name="body" id="post-body" rows="6" required placeholder="相談・経験談などを自由に書いてください" oninput="onBodyInput(this.value)"></textarea>
+      <div style="position:relative">
+        <textarea name="body" id="post-body" rows="6" required maxlength="250" placeholder="相談・経験談などを自由に書いてください" oninput="onBodyInput(this.value)" style="width:100%;padding:.45rem .65rem;border:1px solid #e0d8c8;border-radius:6px;font-size:.88rem;background:#faf8f2;font-family:inherit;resize:vertical"></textarea>
+        <div id="char-count" style="text-align:right;font-size:.72rem;color:#bbb;margin-top:2px">0/250字</div>
+      </div>
     </div>
     <div class="form-grid">
       <div class="form-group">
