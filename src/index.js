@@ -4,7 +4,7 @@ export default {
     const path = url.pathname;
     const method = request.method;
 
-    // ルーティング
+    // ルーティングa
     if (path === '/' && method === 'GET') {
       return handleTop(env);
     }
