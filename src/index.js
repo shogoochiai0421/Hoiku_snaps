@@ -321,6 +321,23 @@ function renderPostModal(tags) {
 }
 
 // =============================================
+// 共通ヘッダー
+// =============================================
+
+function renderHeader(searchQuery = '') {
+  return `
+<header class="header">
+  <div class="logo"><!-- ロゴ画像 --></div>
+  <form class="search-wrap" action="/" method="GET">
+    <span>🔍</span>
+    <input type="text" name="q" placeholder="本文・タグを検索" value="${esc(searchQuery)}" id="search-input">
+    <button type="submit" class="search-btn">検索</button>
+  </form>
+  <a class="btn-post" href="/post">＋ 投稿する</a>
+</header>`;
+}
+
+// =============================================
 // サイドバー
 // =============================================
 
